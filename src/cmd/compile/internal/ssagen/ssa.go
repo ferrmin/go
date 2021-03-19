@@ -261,8 +261,7 @@ func regAbiForFuncType(ft *types.Func) bool {
 }
 
 func regabiEnabledForAllCompilation() bool {
-	// TODO compiler does not yet change behavior for GOEXPERIMENT=regabi
-	return false && objabi.Regabi_enabled != 0
+	return objabi.Experiment.RegabiArgs
 }
 
 // getParam returns the Field of ith param of node n (which is a
@@ -4019,25 +4018,25 @@ func InitTables() {
 			s.vars[memVar] = s.newValue3(ssa.OpAtomicAnd8, types.TypeMem, args[0], args[1], s.mem())
 			return nil
 		},
-		sys.AMD64, sys.MIPS, sys.PPC64, sys.S390X)
+		sys.AMD64, sys.MIPS, sys.PPC64, sys.RISCV64, sys.S390X)
 	addF("runtime/internal/atomic", "And",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			s.vars[memVar] = s.newValue3(ssa.OpAtomicAnd32, types.TypeMem, args[0], args[1], s.mem())
 			return nil
 		},
-		sys.AMD64, sys.MIPS, sys.PPC64, sys.S390X)
+		sys.AMD64, sys.MIPS, sys.PPC64, sys.RISCV64, sys.S390X)
 	addF("runtime/internal/atomic", "Or8",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			s.vars[memVar] = s.newValue3(ssa.OpAtomicOr8, types.TypeMem, args[0], args[1], s.mem())
 			return nil
 		},
-		sys.AMD64, sys.ARM64, sys.MIPS, sys.PPC64, sys.S390X)
+		sys.AMD64, sys.ARM64, sys.MIPS, sys.PPC64, sys.RISCV64, sys.S390X)
 	addF("runtime/internal/atomic", "Or",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			s.vars[memVar] = s.newValue3(ssa.OpAtomicOr32, types.TypeMem, args[0], args[1], s.mem())
 			return nil
 		},
-		sys.AMD64, sys.MIPS, sys.PPC64, sys.S390X)
+		sys.AMD64, sys.MIPS, sys.PPC64, sys.RISCV64, sys.S390X)
 
 	atomicAndOrEmitterARM64 := func(s *state, n *ir.CallExpr, args []*ssa.Value, op ssa.Op, typ types.Kind) {
 		s.vars[memVar] = s.newValue3(op, types.TypeMem, args[0], args[1], s.mem())
@@ -7448,7 +7447,7 @@ func clobberBase(n ir.Node) ir.Node {
 //
 func callTargetLSym(callee *ir.Name, callerLSym *obj.LSym) *obj.LSym {
 	lsym := callee.Linksym()
-	if !base.Flag.ABIWrap {
+	if !objabi.Experiment.RegabiWrappers {
 		return lsym
 	}
 	fn := callee.Func
