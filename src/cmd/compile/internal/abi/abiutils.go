@@ -168,7 +168,7 @@ func appendParamTypes(rts []*types.Type, t *types.Type) []*types.Type {
 		typ := t.Kind()
 		switch typ {
 		case types.TARRAY:
-			for i := int64(0); i < t.Size(); i++ { // 0 gets no registers, plus future-proofing.
+			for i := int64(0); i < t.NumElem(); i++ { // 0 gets no registers, plus future-proofing.
 				rts = appendParamTypes(rts, t.Elem())
 			}
 		case types.TSTRUCT:
@@ -225,27 +225,22 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 	return offsets, at
 }
 
-// SpillOffset returns the offset *within the spill area* for the parameter that "a" describes.
-// Registers will be spilled here; if a memory home is needed (for a pointer method e.g.)
-// then that will be the address.
-// This will panic if "a" describes a stack-allocated parameter.
-func (a *ABIParamAssignment) SpillOffset() int32 {
-	if len(a.Registers) == 0 {
-		panic("Stack-allocated parameters have no spill offset")
-	}
-	return a.offset
-}
-
-// FrameOffset returns the location that a value would spill to, if any exists.
-// For register-allocated inputs, that is their spill offset reserved for morestack
-// (might as well use it, it is there); for stack-allocated inputs and outputs,
-// that is their location on the stack.  For register-allocated outputs, there is
-// no defined spill area, so return -1.
+// FrameOffset returns the frame-pointer-relative location that a function
+// would spill its input or output parameter to, if such a spill slot exists.
+// If there is none defined (e.g., register-allocated outputs) it panics.
+// For register-allocated inputs that is their spill offset reserved for morestack;
+// for stack-allocated inputs and outputs, that is their location on the stack.
+// (In a future version of the ABI, register-resident inputs may lose their defined
+// spill area to help reduce stack sizes.)
 func (a *ABIParamAssignment) FrameOffset(i *ABIParamResultInfo) int64 {
-	if len(a.Registers) == 0 || a.offset == -1 {
-		return int64(a.offset)
+	if a.offset == -1 {
+		panic("Function parameter has no ABI-defined frame-pointer offset")
 	}
-	return int64(a.offset) + i.SpillAreaOffset()
+	if len(a.Registers) == 0 { // passed on stack
+		return int64(a.offset) - i.config.LocalsOffset()
+	}
+	// spill area for registers
+	return int64(a.offset) + i.SpillAreaOffset() - i.config.LocalsOffset()
 }
 
 // RegAmounts holds a specified number of integer/float registers.
@@ -462,7 +457,7 @@ func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field
 		// Getting this wrong breaks stackmaps, see liveness/plive.go:WriteFuncMap and typebits/typebits.go:Set
 		parameterUpdateMu.Lock()
 		defer parameterUpdateMu.Unlock()
-		off := a.FrameOffset(result) - config.LocalsOffset()
+		off := a.FrameOffset(result)
 		fOffset := f.Offset
 		if fOffset == types.BOGUS_FUNARG_OFFSET {
 			// Set the Offset the first time. After that, we may recompute it, but it should never change.
