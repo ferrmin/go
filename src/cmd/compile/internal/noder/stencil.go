@@ -303,8 +303,6 @@ func (g *irgen) genericSubst(newsym *types.Sym, nameNode *ir.Name, targs []ir.No
 	ir.MarkFunc(newf.Nname)
 	newf.SetTypecheck(1)
 	newf.Nname.SetTypecheck(1)
-	// TODO(danscales) - remove later, but avoid confusion for now.
-	newf.Pragma = ir.Noinline
 
 	// Make sure name/type of newf is set before substituting the body.
 	newf.Body = subst.list(gf.Body)
@@ -715,12 +713,10 @@ func (subst *subster) typ(t *types.Type) *types.Type {
 			return newsym.Def.Type()
 		}
 
-		// In order to deal with recursive generic types, create a TFORW type
-		// initially and set its Def field, so it can be found if this type
-		// appears recursively within the type.
-		forw = types.New(types.TFORW)
-		forw.SetSym(newsym)
-		newsym.Def = ir.TypeNode(forw)
+		// In order to deal with recursive generic types, create a TFORW
+		// type initially and set the Def field of its sym, so it can be
+		// found if this type appears recursively within the type.
+		forw = newNamedTypeWithSym(t.Pos(), newsym)
 		//println("Creating new type by sub", newsym.Name, forw.HasTParam())
 		forw.SetRParams(neededTargs)
 	}
@@ -864,11 +860,9 @@ func (subst *subster) typ(t *types.Type) *types.Type {
 // on the corresponding in/out parameters in dcl. It depends on the in and out
 // parameters being in order in dcl.
 func (subst *subster) fields(class ir.Class, oldfields []*types.Field, dcl []*ir.Name) []*types.Field {
-	newfields := make([]*types.Field, len(oldfields))
-	var i int
-
 	// Find the starting index in dcl of declarations of the class (either
 	// PPARAM or PPARAMOUT).
+	var i int
 	for i = range dcl {
 		if dcl[i].Class == class {
 			break
@@ -878,11 +872,18 @@ func (subst *subster) fields(class ir.Class, oldfields []*types.Field, dcl []*ir
 	// Create newfields nodes that are copies of the oldfields nodes, but
 	// with substitution for any type params, and with Nname set to be the node in
 	// Dcl for the corresponding PPARAM or PPARAMOUT.
+	newfields := make([]*types.Field, len(oldfields))
 	for j := range oldfields {
 		newfields[j] = oldfields[j].Copy()
 		newfields[j].Type = subst.typ(oldfields[j].Type)
-		newfields[j].Nname = dcl[i]
-		i++
+		// A param field will be missing from dcl if its name is
+		// unspecified or specified as "_". So, we compare the dcl sym
+		// with the field sym. If they don't match, this dcl (if there is
+		// one left) must apply to a later field.
+		if i < len(dcl) && dcl[i].Sym() == oldfields[j].Sym {
+			newfields[j].Nname = dcl[i]
+			i++
+		}
 	}
 	return newfields
 }
@@ -893,4 +894,14 @@ func deref(t *types.Type) *types.Type {
 		return t.Elem()
 	}
 	return t
+}
+
+// newNamedTypeWithSym returns a TFORW type t with name specified by sym, such
+// that t.nod and sym.Def are set correctly.
+func newNamedTypeWithSym(pos src.XPos, sym *types.Sym) *types.Type {
+	name := ir.NewDeclNameAt(pos, ir.OTYPE, sym)
+	forw := types.NewNamed(name)
+	name.SetType(forw)
+	sym.Def = name
+	return forw
 }

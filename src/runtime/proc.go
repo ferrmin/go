@@ -3856,15 +3856,15 @@ func exitsyscallfast_pidle() bool {
 // exitsyscall slow path on g0.
 // Failed to acquire P, enqueue gp as runnable.
 //
+// Called via mcall, so gp is the calling g from this M.
+//
 //go:nowritebarrierrec
 func exitsyscall0(gp *g) {
-	_g_ := getg()
-
 	casgstatus(gp, _Gsyscall, _Grunnable)
 	dropg()
 	lock(&sched.lock)
 	var _p_ *p
-	if schedEnabled(_g_) {
+	if schedEnabled(gp) {
 		_p_ = pidleget()
 	}
 	if _p_ == nil {
@@ -3878,8 +3878,11 @@ func exitsyscall0(gp *g) {
 		acquirep(_p_)
 		execute(gp, false) // Never returns.
 	}
-	if _g_.m.lockedg != 0 {
+	if gp.lockedm != 0 {
 		// Wait until another thread schedules gp and so m again.
+		//
+		// N.B. lockedm must be this M, as this g was running on this M
+		// before entersyscall.
 		stoplockedm()
 		execute(gp, false) // Never returns.
 	}
@@ -4019,6 +4022,12 @@ func malg(stacksize int32) *g {
 //
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
+	if experimentRegabiDefer && siz != 0 {
+		// TODO: When we commit to experimentRegabiDefer,
+		// rewrite newproc's comment, since it will no longer
+		// have a funny stack layout or need to be nosplit.
+		throw("go with non-empty frame")
+	}
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
 	gp := getg()
 	pc := getcallerpc()
