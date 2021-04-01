@@ -225,13 +225,26 @@ const magicNameDotSuffix = ".MagicMethodNameForTestingRegisterABI"
 const magicLastTypeName = "MagicLastTypeNameForTestingRegisterABI"
 
 // abiForFunc implements ABI policy for a function, but does not return a copy of the ABI.
-// Passing a nil function returns ABIInternal.
+// Passing a nil function returns the default ABI based on experiment configuration.
 func abiForFunc(fn *ir.Func, abi0, abi1 *abi.ABIConfig) *abi.ABIConfig {
-	a := abi1
-	if !regabiEnabledForAllCompilation() {
-		a = abi0
+	if objabi.Experiment.RegabiArgs {
+		// Select the ABI based on the function's defining ABI.
+		if fn == nil {
+			return abi1
+		}
+		switch fn.ABI {
+		case obj.ABI0:
+			return abi0
+		case obj.ABIInternal:
+			// TODO(austin): Clean up the nomenclature here.
+			// It's not clear that "abi1" is ABIInternal.
+			return abi1
+		}
+		base.Fatalf("function %v has unknown ABI %v", fn, fn.ABI)
+		panic("not reachable")
 	}
 
+	a := abi0
 	if fn != nil {
 		name := ir.FuncName(fn)
 		magicName := strings.HasSuffix(name, magicNameDotSuffix)
@@ -261,10 +274,6 @@ func abiForFunc(fn *ir.Func, abi0, abi1 *abi.ABIConfig) *abi.ABIConfig {
 func regAbiForFuncType(ft *types.Func) bool {
 	np := ft.Params.NumFields()
 	return np > 0 && strings.Contains(ft.Params.FieldType(np-1).String(), magicLastTypeName)
-}
-
-func regabiEnabledForAllCompilation() bool {
-	return objabi.Experiment.RegabiArgs
 }
 
 // getParam returns the Field of ith param of node n (which is a
@@ -4842,24 +4851,27 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool) *ssa.Val
 	var codeptr *ssa.Value // ptr to target code (if dynamic)
 	var rcvr *ssa.Value    // receiver to set
 	fn := n.X
-	var ACArgs []*types.Type       // AuxCall args
-	var ACResults []*types.Type    // AuxCall results
-	var callArgs []*ssa.Value      // For late-expansion, the args themselves (not stored, args to the call instead).
-	inRegistersForTesting := false // If a call uses register ABI for one of the testing reasons, pragma, magic types, magic names
+	var ACArgs []*types.Type    // AuxCall args
+	var ACResults []*types.Type // AuxCall results
+	var callArgs []*ssa.Value   // For late-expansion, the args themselves (not stored, args to the call instead).
 
-	var magicFnNameSym *types.Sym
-	if fn.Name() != nil {
-		magicFnNameSym = fn.Name().Sym()
-		ss := magicFnNameSym.Name
-		if strings.HasSuffix(ss, magicNameDotSuffix) {
-			inRegistersForTesting = true
+	callABI := s.f.ABIDefault
+
+	if !objabi.Experiment.RegabiArgs {
+		var magicFnNameSym *types.Sym
+		if fn.Name() != nil {
+			magicFnNameSym = fn.Name().Sym()
+			ss := magicFnNameSym.Name
+			if strings.HasSuffix(ss, magicNameDotSuffix) {
+				callABI = s.f.ABI1
+			}
 		}
-	}
-	if magicFnNameSym == nil && n.Op() == ir.OCALLINTER {
-		magicFnNameSym = fn.(*ir.SelectorExpr).Sym()
-		ss := magicFnNameSym.Name
-		if strings.HasSuffix(ss, magicNameDotSuffix[1:]) {
-			inRegistersForTesting = true
+		if magicFnNameSym == nil && n.Op() == ir.OCALLINTER {
+			magicFnNameSym = fn.(*ir.SelectorExpr).Sym()
+			ss := magicFnNameSym.Name
+			if strings.HasSuffix(ss, magicNameDotSuffix[1:]) {
+				callABI = s.f.ABI1
+			}
 		}
 	}
 
@@ -4872,10 +4884,23 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool) *ssa.Val
 		if k == callNormal && fn.Op() == ir.ONAME && fn.(*ir.Name).Class == ir.PFUNC {
 			fn := fn.(*ir.Name)
 			callee = fn
-			// TODO(register args) remove after register abi is working
-			inRegistersImported := fn.Pragma()&ir.RegisterParams != 0
-			inRegistersSamePackage := fn.Func != nil && fn.Func.Pragma&ir.RegisterParams != 0
-			inRegistersForTesting = inRegistersForTesting || inRegistersImported || inRegistersSamePackage
+			if objabi.Experiment.RegabiArgs {
+				// This is a static call, so it may be
+				// a direct call to a non-ABIInternal
+				// function. fn.Func may be nil for
+				// some compiler-generated functions,
+				// but those are all ABIInternal.
+				if fn.Func != nil {
+					callABI = abiForFunc(fn.Func, s.f.ABI0, s.f.ABI1)
+				}
+			} else {
+				// TODO(register args) remove after register abi is working
+				inRegistersImported := fn.Pragma()&ir.RegisterParams != 0
+				inRegistersSamePackage := fn.Func != nil && fn.Func.Pragma&ir.RegisterParams != 0
+				if inRegistersImported || inRegistersSamePackage {
+					callABI = s.f.ABI1
+				}
+			}
 			break
 		}
 		closure = s.expr(fn)
@@ -4900,14 +4925,11 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool) *ssa.Val
 		}
 	}
 
-	if regAbiForFuncType(n.X.Type().FuncType()) {
-		// Magic last type in input args to call
-		inRegistersForTesting = true
-	}
-
-	callABI := s.f.ABIDefault
-	if inRegistersForTesting {
-		callABI = s.f.ABI1
+	if !objabi.Experiment.RegabiArgs {
+		if regAbiForFuncType(n.X.Type().FuncType()) {
+			// Magic last type in input args to call
+			callABI = s.f.ABI1
+		}
 	}
 
 	params := callABI.ABIAnalyze(n.X.Type(), false /* Do not set (register) nNames from caller side -- can cause races. */)
