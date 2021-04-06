@@ -625,9 +625,9 @@ func (subst *subster) tinter(t *types.Type) *types.Type {
 	for i, f := range t.Methods().Slice() {
 		t2 := subst.typ(f.Type)
 		if (t2 != f.Type || f.Nname != nil) && newfields == nil {
-			newfields = make([]*types.Field, t.NumFields())
+			newfields = make([]*types.Field, t.Methods().Len())
 			for j := 0; j < i; j++ {
-				newfields[j] = t.Methods().Slice()[j]
+				newfields[j] = t.Methods().Index(j)
 			}
 		}
 		if newfields != nil {
@@ -716,7 +716,7 @@ func (subst *subster) typ(t *types.Type) *types.Type {
 		// In order to deal with recursive generic types, create a TFORW
 		// type initially and set the Def field of its sym, so it can be
 		// found if this type appears recursively within the type.
-		forw = newNamedTypeWithSym(t.Pos(), newsym)
+		forw = newIncompleteNamedType(t.Pos(), newsym)
 		//println("Creating new type by sub", newsym.Name, forw.HasTParam())
 		forw.SetRParams(neededTargs)
 	}
@@ -896,9 +896,9 @@ func deref(t *types.Type) *types.Type {
 	return t
 }
 
-// newNamedTypeWithSym returns a TFORW type t with name specified by sym, such
+// newIncompleteNamedType returns a TFORW type t with name specified by sym, such
 // that t.nod and sym.Def are set correctly.
-func newNamedTypeWithSym(pos src.XPos, sym *types.Sym) *types.Type {
+func newIncompleteNamedType(pos src.XPos, sym *types.Sym) *types.Type {
 	name := ir.NewDeclNameAt(pos, ir.OTYPE, sym)
 	forw := types.NewNamed(name)
 	name.SetType(forw)

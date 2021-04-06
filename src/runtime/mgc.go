@@ -759,8 +759,7 @@ func (c *gcControllerState) findRunnableGCWorker(_p_ *p) *g {
 				return false
 			}
 
-			// TODO: having atomic.Casint64 would be more pleasant.
-			if atomic.Cas64((*uint64)(unsafe.Pointer(ptr)), uint64(v), uint64(v-1)) {
+			if atomic.Casint64(ptr, v, v-1) {
 				return true
 			}
 		}
@@ -2347,9 +2346,12 @@ func fmtNSAsMS(buf []byte, ns uint64) []byte {
 // if any other work appears after this call (such as returning).
 // Typically the following call should be marked go:noinline so it
 // performs a stack check.
+//
+// In rare cases this may not cause the stack to move, specifically if
+// there's a preemption between this call and the next.
 func gcTestMoveStackOnNextCall() {
 	gp := getg()
-	gp.stackguard0 = getcallersp()
+	gp.stackguard0 = stackForceMove
 }
 
 // gcTestIsReachable performs a GC and returns a bit set where bit i

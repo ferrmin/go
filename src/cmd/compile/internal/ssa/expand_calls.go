@@ -317,6 +317,15 @@ func (x *expandState) rewriteSelect(leaf *Value, selector *Value, offset int64, 
 		}
 	}
 	switch selector.Op {
+	case OpArgIntReg, OpArgFloatReg:
+		if leafType == selector.Type { // OpIData leads us here, sometimes.
+			leaf.copyOf(selector)
+		} else {
+			x.f.Fatalf("Unexpected %s type, selector=%s, leaf=%s\n", selector.Op.String(), selector.LongString(), leaf.LongString())
+		}
+		if x.debug {
+			x.Printf("---%s, break\n", selector.Op.String())
+		}
 	case OpArg:
 		if !x.isAlreadyExpandedAggregateType(selector.Type) {
 			if leafType == selector.Type { // OpIData leads us here, sometimes.
@@ -588,6 +597,14 @@ func (x *expandState) decomposeArg(pos src.XPos, b *Block, source, mem *Value, t
 			w := x.commonArgs[selKey{source, off, rt.Width, rt}]
 			if w == nil {
 				w = x.newArgToMemOrRegs(source, w, off, i, rt, pos)
+			}
+			if t.IsPtrShaped() {
+				// Preserve the original store type. This ensures pointer type
+				// properties aren't discarded (e.g, notinheap).
+				if rt.Width != t.Width || len(pa.Registers) != 1 || i != loadRegOffset {
+					b.Func.Fatalf("incompatible store type %v and %v, i=%d", t, rt, i)
+				}
+				rt = t
 			}
 			mem = x.storeArgOrLoad(pos, b, w, mem, rt, storeOffset+off, i, storeRc.next(rt))
 		}
@@ -933,6 +950,11 @@ func (x *expandState) storeArgOrLoad(pos src.XPos, b *Block, source, mem *Value,
 // stores (or later, register movement).  Extra args for interface and closure calls are ignored,
 // but removed.
 func (x *expandState) rewriteArgs(v *Value, firstArg int) (*Value, []*Value) {
+	if x.debug {
+		x.indent(3)
+		defer x.indent(-3)
+		x.Printf("rewriteArgs(%s; %d)\n", v.LongString(), firstArg)
+	}
 	// Thread the stores on the memory arg
 	aux := v.Aux.(*AuxCall)
 	pos := v.Pos.WithNotStmt()
@@ -961,7 +983,7 @@ func (x *expandState) rewriteArgs(v *Value, firstArg int) (*Value, []*Value) {
 				aOffset = aux.OffsetOfArg(auxI)
 			}
 			if x.debug {
-				x.Printf("storeArg %s, %v, %d\n", a.LongString(), aType, aOffset)
+				x.Printf("...storeArg %s, %v, %d\n", a.LongString(), aType, aOffset)
 			}
 			rc.init(aRegs, aux.abiInfo, result, x.sp)
 			mem = x.storeArgOrLoad(pos, v.Block, a, mem, aType, aOffset, 0, rc)
@@ -1048,6 +1070,7 @@ func expandCalls(f *Func) {
 			}
 		}
 		if isBlockMultiValueExit(b) {
+			x.indent(3)
 			// Very similar to code in rewriteArgs, but results instead of args.
 			v := b.Controls[0]
 			m0 := v.MemoryArg()
@@ -1055,7 +1078,12 @@ func expandCalls(f *Func) {
 			aux := f.OwnAux
 			pos := v.Pos.WithNotStmt()
 			allResults := []*Value{}
+			if x.debug {
+				x.Printf("multiValueExit rewriting %s\n", v.LongString())
+			}
+			var oldArgs []*Value
 			for j, a := range v.Args[:len(v.Args)-1] {
+				oldArgs = append(oldArgs, a)
 				i := int64(j)
 				auxType := aux.TypeOfResult(i)
 				auxBase := b.NewValue2A(v.Pos, OpLocalAddr, types.NewPtr(auxType), aux.NameOfResult(i), x.sp, mem)
@@ -1093,6 +1121,18 @@ func expandCalls(f *Func) {
 			v.AddArg(mem)
 			v.Type = types.NewResults(append(abi.RegisterTypes(aux.abiInfo.OutParams()), types.TypeMem))
 			b.SetControl(v)
+			for _, a := range oldArgs {
+				if a.Uses == 0 {
+					if x.debug {
+						x.Printf("...marking %v unused\n", a.LongString())
+					}
+					a.reset(OpInvalid)
+				}
+			}
+			if x.debug {
+				x.Printf("...multiValueExit new result %s\n", v.LongString())
+			}
+			x.indent(-3)
 		}
 	}
 
@@ -1114,9 +1154,6 @@ func expandCalls(f *Func) {
 		for _, v := range b.Values {
 			if v.Op == OpStore {
 				t := v.Aux.(*types.Type)
-				if t.IsPtrShaped() { // Everything already fits, and this ensures pointer type properties aren't discarded (e.g, notinheap)
-					continue
-				}
 				source := v.Args[1]
 				tSrc := source.Type
 				iAEATt := x.isAlreadyExpandedAggregateType(t)

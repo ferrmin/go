@@ -28,9 +28,9 @@ import (
 // commented out there should be the actual values once
 // we're ready to use the register ABI everywhere.
 var (
-	intArgRegs   = 0          // abi.IntArgRegs
-	floatArgRegs = 0          // abi.FloatArgRegs
-	floatRegSize = uintptr(0) // uintptr(abi.EffectiveFloatRegSize)
+	intArgRegs   = abi.IntArgRegs * experimentRegabiArgs
+	floatArgRegs = abi.FloatArgRegs * experimentRegabiArgs
+	floatRegSize = uintptr(abi.EffectiveFloatRegSize * experimentRegabiArgs)
 )
 
 // abiStep represents an ABI "instruction." Each instruction
@@ -121,6 +121,7 @@ func (a *abiSeq) stepsForValue(i int) []abiStep {
 // If the value was stack-assigned, returns the single
 // abiStep describing that translation, and nil otherwise.
 func (a *abiSeq) addArg(t *rtype) *abiStep {
+	// We'll always be adding a new value, so do that first.
 	pStart := len(a.steps)
 	a.valueStart = append(a.valueStart, pStart)
 	if t.size == 0 {
@@ -141,8 +142,13 @@ func (a *abiSeq) addArg(t *rtype) *abiStep {
 		a.stackBytes = align(a.stackBytes, uintptr(t.align))
 		return nil
 	}
+	// Hold a copy of "a" so that we can roll back if
+	// register assignment fails.
+	aOld := *a
 	if !a.regAssign(t, 0) {
-		a.steps = a.steps[:pStart]
+		// Register assignment failed. Roll back any changes
+		// and stack-assign.
+		*a = aOld
 		a.stackAssign(t.size, uintptr(t.align))
 		return &a.steps[len(a.steps)-1]
 	}
@@ -227,19 +233,9 @@ func (a *abiSeq) regAssign(t *rtype, offset uintptr) bool {
 			return false
 		}
 	case Struct:
-		if t.size == 0 {
-			// There's nothing to assign, so don't modify
-			// a.steps but succeed so the caller doesn't
-			// try to stack-assign this value.
-			return true
-		}
 		st := (*structType)(unsafe.Pointer(t))
 		for i := range st.fields {
 			f := &st.fields[i]
-			if f.typ.Size() == 0 {
-				// Ignore zero-sized fields.
-				continue
-			}
 			if !a.regAssign(f.typ, offset+f.offset()) {
 				return false
 			}
@@ -349,11 +345,15 @@ type abiDesc struct {
 	// passed to reflectcall.
 	stackPtrs *bitVector
 
-	// outRegPtrs is a bitmap whose i'th bit indicates
-	// whether the i'th integer result register contains
-	// a pointer. Used by reflectcall to make result
-	// pointers visible to the GC.
-	outRegPtrs abi.IntArgRegBitmap
+	// inRegPtrs is a bitmap whose i'th bit indicates
+	// whether the i'th integer argument register contains
+	// a pointer. Used by makeFuncStub and methodValueCall
+	// to make result pointers visible to the GC.
+	//
+	// outRegPtrs is the same, but for result values.
+	// Used by reflectcall to make result pointers visible
+	// to the GC.
+	inRegPtrs, outRegPtrs abi.IntArgRegBitmap
 }
 
 func (a *abiDesc) dump() {
@@ -381,6 +381,10 @@ func newAbiDesc(t *funcType, rcvr *rtype) abiDesc {
 	// Compute gc program & stack bitmap for stack arguments
 	stackPtrs := new(bitVector)
 
+	// Compute the stack frame pointer bitmap and register
+	// pointer bitmap for arguments.
+	inRegPtrs := abi.IntArgRegBitmap{}
+
 	// Compute abiSeq for input parameters.
 	var in abiSeq
 	if rcvr != nil {
@@ -395,13 +399,18 @@ func newAbiDesc(t *funcType, rcvr *rtype) abiDesc {
 			spill += ptrSize
 		}
 	}
-	for _, arg := range t.in() {
+	for i, arg := range t.in() {
 		stkStep := in.addArg(arg)
 		if stkStep != nil {
 			addTypeBits(stackPtrs, stkStep.stkOff, arg)
 		} else {
 			spill = align(spill, uintptr(arg.align))
 			spill += arg.size
+			for _, st := range in.stepsForValue(i) {
+				if st.kind == abiStepPointer {
+					inRegPtrs.Set(st.ireg)
+				}
+			}
 		}
 	}
 	spill = align(spill, ptrSize)
@@ -438,5 +447,5 @@ func newAbiDesc(t *funcType, rcvr *rtype) abiDesc {
 	// Undo the faking from earlier so that stackBytes
 	// is accurate.
 	out.stackBytes -= retOffset
-	return abiDesc{in, out, stackCallArgsSize, retOffset, spill, stackPtrs, outRegPtrs}
+	return abiDesc{in, out, stackCallArgsSize, retOffset, spill, stackPtrs, inRegPtrs, outRegPtrs}
 }
