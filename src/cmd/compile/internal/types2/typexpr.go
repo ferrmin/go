@@ -131,7 +131,7 @@ func (check *Checker) typ(e syntax.Expr) Type {
 // (see ordinaryType).
 func (check *Checker) varType(e syntax.Expr) Type {
 	typ := check.definedType(e, nil)
-	check.ordinaryType(startPos(e), typ)
+	check.ordinaryType(syntax.StartPos(e), typ)
 	return typ
 }
 
@@ -671,7 +671,7 @@ func (check *Checker) instantiatedType(x syntax.Expr, targs []syntax.Expr, def *
 	// determine argument positions (for error reporting)
 	typ.poslist = make([]syntax.Pos, len(targs))
 	for i, arg := range targs {
-		typ.poslist[i] = arg.Pos()
+		typ.poslist[i] = syntax.StartPos(arg)
 	}
 
 	// make sure we check instantiation works at least once
@@ -1154,7 +1154,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 			// spec: "An embedded type must be specified as a type name T or as a
 			// pointer to a non-interface type name *T, and T itself may not be a
 			// pointer type."
-			pos := startPos(f.Type)
+			pos := syntax.StartPos(f.Type)
 			name := embeddedFieldIdent(f.Type)
 			if name == nil {
 				check.errorf(pos, "invalid embedded field type %s", f.Type)
