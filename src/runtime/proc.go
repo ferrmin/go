@@ -5,14 +5,12 @@
 package runtime
 
 import (
-	"internal/bytealg"
 	"internal/cpu"
+	"internal/goexperiment"
 	"runtime/internal/atomic"
 	"runtime/internal/sys"
 	"unsafe"
 )
-
-var buildVersion = sys.TheVersion
 
 // set using cmd/go/internal/modload.ModInfoProg
 var modinfo string
@@ -4022,8 +4020,8 @@ func malg(stacksize int32) *g {
 //
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
-	if experimentRegabiDefer && siz != 0 {
-		// TODO: When we commit to experimentRegabiDefer,
+	if goexperiment.RegabiDefer && siz != 0 {
+		// TODO: When we commit to GOEXPERIMENT=regabidefer,
 		// rewrite newproc's comment, since it will no longer
 		// have a funny stack layout or need to be nosplit.
 		throw("go with non-empty frame")
@@ -6037,26 +6035,6 @@ func setMaxThreads(in int) (out int) {
 	checkmcount()
 	unlock(&sched.lock)
 	return
-}
-
-func haveexperiment(name string) bool {
-	// GOEXPERIMENT is a comma-separated list of enabled
-	// experiments. It's not the raw environment variable, but a
-	// pre-processed list from cmd/internal/objabi.
-	x := sys.GOEXPERIMENT
-	for x != "" {
-		xname := ""
-		i := bytealg.IndexByteString(x, ',')
-		if i < 0 {
-			xname, x = x, ""
-		} else {
-			xname, x = x[:i], x[i+1:]
-		}
-		if xname == name {
-			return true
-		}
-	}
-	return false
 }
 
 //go:nosplit

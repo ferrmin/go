@@ -14,6 +14,7 @@ import (
 	"cmd/compile/internal/ssagen"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
+	"cmd/internal/objabi"
 	"cmd/internal/sys"
 )
 
@@ -311,7 +312,17 @@ func convFuncName(from, to *types.Type) (fnname string, needsaddr bool) {
 		case types.TARRAY:
 			return t.NumElem() == 1 && isFloatLike(t.Elem())
 		case types.TSTRUCT:
-			return t.NumFields() == 1 && isFloatLike(t.Field(0).Type)
+			fsl := t.FieldSlice()
+			for idx, f := range fsl {
+				if f.Type.Width == 0 {
+					continue
+				}
+				if isFloatLike(f.Type) && idx == len(fsl)-1 {
+					return true
+				}
+				return false
+			}
+			return false
 		}
 		return false
 	}
@@ -328,11 +339,11 @@ func convFuncName(from, to *types.Type) (fnname string, needsaddr bool) {
 			return "convT16", false
 		case from.Size() == 4 && isFloatLike(from):
 			return "convT32F", false
-		case from.Size() == 4 && from.Align == 4 && !from.HasPointers():
+		case from.Size() == 4 && from.Align == 4 && !from.HasPointers() && (!objabi.Experiment.RegabiArgs || from.NumComponents(types.CountBlankFields) == 1):
 			return "convT32", false
 		case from.Size() == 8 && isFloatLike(from):
 			return "convT64F", false
-		case from.Size() == 8 && from.Align == types.Types[types.TUINT64].Align && !from.HasPointers():
+		case from.Size() == 8 && from.Align == types.Types[types.TUINT64].Align && !from.HasPointers() && (!objabi.Experiment.RegabiArgs || from.NumComponents(types.CountBlankFields) == 1):
 			return "convT64", false
 		}
 		if sc := from.SoleComponent(); sc != nil {
