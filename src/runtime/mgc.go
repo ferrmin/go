@@ -175,7 +175,7 @@ func gcinit() {
 	}
 
 	// No sweep on the first cycle.
-	mheap_.sweepdone = 1
+	mheap_.sweepDrained = 1
 
 	// Set a reasonable initial GC trigger.
 	memstats.triggerRatio = 7 / 8.0
@@ -1187,7 +1187,7 @@ func GC() {
 	// First, wait for sweeping to finish. (We know there are no
 	// more spans on the sweep queue, but we may be concurrently
 	// sweeping spans, so we have to wait.)
-	for atomic.Load(&work.cycles) == n+1 && atomic.Load(&mheap_.sweepers) != 0 {
+	for atomic.Load(&work.cycles) == n+1 && !isSweepDone() {
 		Gosched()
 	}
 
@@ -1749,6 +1749,13 @@ func gcMarkTermination(nextTriggerRatio float64) {
 	// so events don't leak into the wrong cycle.
 	mProf_NextCycle()
 
+	// There may be stale spans in mcaches that need to be swept.
+	// Those aren't tracked in any sweep lists, so we need to
+	// count them against sweep completion until we ensure all
+	// those spans have been forced out.
+	sl := newSweepLocker()
+	sl.blockCompletion()
+
 	systemstack(func() { startTheWorldWithSema(true) })
 
 	// Flush the heap profile so we can start a new cycle next GC.
@@ -1772,6 +1779,9 @@ func gcMarkTermination(nextTriggerRatio float64) {
 			_p_.mcache.prepareForSweep()
 		})
 	})
+	// Now that we've swept stale spans in mcaches, they don't
+	// count against unswept spans.
+	sl.dispose()
 
 	// Print gctrace before dropping worldsema. As soon as we drop
 	// worldsema another cycle could start and smash the stats
@@ -2182,7 +2192,7 @@ func gcSweep(mode gcMode) {
 
 	lock(&mheap_.lock)
 	mheap_.sweepgen += 2
-	mheap_.sweepdone = 0
+	mheap_.sweepDrained = 0
 	mheap_.pagesSwept = 0
 	mheap_.sweepArenas = mheap_.allArenas
 	mheap_.reclaimIndex = 0
@@ -2389,11 +2399,6 @@ func gcTestIsReachable(ptrs ...unsafe.Pointer) (mask uint64) {
 	semrelease(&gcsema)
 
 	// Force a full GC and sweep.
-	GC()
-
-	// TODO(austin): Work around issue #45315. One GC() can return
-	// without finishing the sweep. Do a second to force the sweep
-	// through.
 	GC()
 
 	// Process specials.
