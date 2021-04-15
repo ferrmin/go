@@ -113,8 +113,8 @@
 // Next GC is after we've allocated an extra amount of memory proportional to
 // the amount already in use. The proportion is controlled by GOGC environment variable
 // (100 by default). If GOGC=100 and we're using 4M, we'll GC again when we get to 8M
-// (this mark is tracked in next_gc variable). This keeps the GC cost in linear
-// proportion to the allocation cost. Adjusting GOGC just changes the linear constant
+// (this mark is tracked in gcController.heapGoal variable). This keeps the GC cost in
+// linear proportion to the allocation cost. Adjusting GOGC just changes the linear constant
 // (and also the amount of extra memory used).
 
 // Oblets
@@ -153,21 +153,12 @@ func gcinit() {
 	if unsafe.Sizeof(workbuf{}) != _WorkbufSize {
 		throw("size of Workbuf is suboptimal")
 	}
-
 	// No sweep on the first cycle.
 	mheap_.sweepDrained = 1
 
-	// Set a reasonable initial GC trigger.
-	gcController.triggerRatio = 7 / 8.0
-
-	// Fake a heapMarked value so it looks like a trigger at
-	// heapMinimum is the appropriate growth from heapMarked.
-	// This will go into computing the initial GC goal.
-	gcController.heapMarked = uint64(float64(heapMinimum) / (1 + gcController.triggerRatio))
-
-	// Set gcPercent from the environment. This will also compute
-	// and set the GC trigger and goal.
-	_ = setGCPercent(readGOGC())
+	// Initialize GC pacer state.
+	// Use the environment variable GOGC for the initial gcPercent value.
+	gcController.init(readGOGC())
 
 	work.startSema = 1
 	work.markDoneSema = 1
@@ -336,6 +327,10 @@ var work struct {
 	// Number of roots of various root types. Set by gcMarkRootPrepare.
 	nFlushCacheRoots                               int
 	nDataRoots, nBSSRoots, nSpanRoots, nStackRoots int
+
+	// Base indexes of each root type. Set by gcMarkRootPrepare.
+	baseFlushCache                                    uint32
+	baseData, baseBSS, baseSpans, baseStacks, baseEnd uint32
 
 	// Each type of GC state transition is protected by a lock.
 	// Since multiple threads can simultaneously detect the state
@@ -557,7 +552,7 @@ func (t gcTrigger) test() bool {
 		// own write.
 		return gcController.heapLive >= gcController.trigger
 	case gcTriggerTime:
-		if gcPercent < 0 {
+		if gcController.gcPercent < 0 {
 			return false
 		}
 		lastgc := int64(atomic.Load64(&memstats.last_gc_nanotime))
@@ -674,7 +669,7 @@ func gcStart(trigger gcTrigger) {
 	work.cycles++
 
 	gcController.startCycle()
-	work.heapGoal = memstats.next_gc
+	work.heapGoal = gcController.heapGoal
 
 	// In STW mode, disable scheduling of user Gs. This may also
 	// disable scheduling of this goroutine, so it may block as
@@ -903,7 +898,7 @@ top:
 	// endCycle depends on all gcWork cache stats being flushed.
 	// The termination algorithm above ensured that up to
 	// allocations since the ragged barrier.
-	nextTriggerRatio := gcController.endCycle()
+	nextTriggerRatio := gcController.endCycle(work.userForced)
 
 	// Perform mark termination. This will restart the world.
 	gcMarkTermination(nextTriggerRatio)
@@ -977,12 +972,12 @@ func gcMarkTermination(nextTriggerRatio float64) {
 		throw("gc done but gcphase != _GCoff")
 	}
 
-	// Record next_gc and heap_inuse for scavenger.
-	memstats.last_next_gc = memstats.next_gc
+	// Record heapGoal and heap_inuse for scavenger.
+	gcController.lastHeapGoal = gcController.heapGoal
 	memstats.last_heap_inuse = memstats.heap_inuse
 
 	// Update GC trigger and pacing for the next cycle.
-	gcSetTriggerRatio(nextTriggerRatio)
+	gcController.commit(nextTriggerRatio)
 
 	// Update timing memstats
 	now := nanotime()
@@ -1362,7 +1357,7 @@ func gcMarkWorkAvailable(p *p) bool {
 // gcMark runs the mark (or, for concurrent GC, mark termination)
 // All gcWork caches must be empty.
 // STW is in effect at this point.
-func gcMark(start_time int64) {
+func gcMark(startTime int64) {
 	if debug.allocfreetrace > 0 {
 		tracegc()
 	}
@@ -1370,7 +1365,7 @@ func gcMark(start_time int64) {
 	if gcphase != _GCmarktermination {
 		throw("in gcMark expecting to see gcphase as _GCmarktermination")
 	}
-	work.tstart = start_time
+	work.tstart = startTime
 
 	// Check that there's no marking work remaining.
 	if work.full != 0 || work.markrootNext < work.markrootJobs {
