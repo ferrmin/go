@@ -30,7 +30,16 @@
 // and "go version <binary>" if it differs from the default experiments.
 //
 // For the set of experiments supported by the current toolchain, see
-// go doc internal/experiment.Flags.
+// "go doc goexperiment.Flags".
+//
+// Note that this package defines the set of experiments (in Flags)
+// and records the experiments that were enabled when the package
+// was compiled (as boolean and integer constants).
+//
+// Note especially that this package does not itself change behavior
+// at run time based on the GOEXPERIMENT variable.
+// The code used in builds to interpret the GOEXPERIMENT variable
+// is in the separate package internal/buildcfg.
 package goexperiment
 
 //go:generate go run mkconsts.go
@@ -51,9 +60,10 @@ type Flags struct {
 	StaticLockRanking bool
 
 	// Regabi is split into several sub-experiments that can be
-	// enabled individually. GOEXPERIMENT=regabi implies the
-	// subset that are currently "working". Not all combinations work.
-	Regabi bool
+	// enabled individually. Not all combinations work.
+	// The "regabi" GOEXPERIMENT is an alias for all "working"
+	// subexperiments.
+
 	// RegabiWrappers enables ABI wrappers for calling between
 	// ABI0 and ABIInternal functions. Without this, the ABIs are
 	// assumed to be identical so cross-ABI calls are direct.

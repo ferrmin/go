@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package objabi
+package buildcfg
 
 import (
 	"fmt"
@@ -20,10 +20,14 @@ import (
 // was built with.)
 var Experiment goexperiment.Flags = parseExperiments()
 
+var regabiSupported = GOARCH == "amd64" && (GOOS == "linux" || GOOS == "darwin" || GOOS == "windows")
+
 // experimentBaseline specifies the experiment flags that are enabled by
 // default in the current toolchain. This is, in effect, the "control"
 // configuration and any variation from this is an experiment.
-var experimentBaseline goexperiment.Flags
+var experimentBaseline = goexperiment.Flags{
+	RegabiWrappers: regabiSupported,
+}
 
 // FramePointerEnabled enables the use of platform conventions for
 // saving frame pointers.
@@ -45,12 +49,24 @@ func parseExperiments() goexperiment.Flags {
 
 	if env != "" {
 		// Create a map of known experiment names.
-		names := make(map[string]reflect.Value)
+		names := make(map[string]func(bool))
 		rv := reflect.ValueOf(&flags).Elem()
 		rt := rv.Type()
 		for i := 0; i < rt.NumField(); i++ {
 			field := rv.Field(i)
-			names[strings.ToLower(rt.Field(i).Name)] = field
+			names[strings.ToLower(rt.Field(i).Name)] = field.SetBool
+		}
+
+		// "regabi" is an alias for all working regabi
+		// subexperiments, and not an experiment itself. Doing
+		// this as an alias make both "regabi" and "noregabi"
+		// do the right thing.
+		names["regabi"] = func(v bool) {
+			flags.RegabiWrappers = v
+			flags.RegabiG = v
+			flags.RegabiReflect = v
+			flags.RegabiDefer = v
+			flags.RegabiArgs = v
 		}
 
 		// Parse names.
@@ -69,32 +85,22 @@ func parseExperiments() goexperiment.Flags {
 			if strings.HasPrefix(f, "no") {
 				f, val = f[2:], false
 			}
-			field, ok := names[f]
+			set, ok := names[f]
 			if !ok {
 				fmt.Printf("unknown experiment %s\n", f)
 				os.Exit(2)
 			}
-			field.SetBool(val)
+			set(val)
 		}
 	}
 
 	// regabi is only supported on amd64.
 	if GOARCH != "amd64" {
-		flags.Regabi = false
 		flags.RegabiWrappers = false
 		flags.RegabiG = false
 		flags.RegabiReflect = false
 		flags.RegabiDefer = false
 		flags.RegabiArgs = false
-	}
-	// Setting regabi sets working sub-experiments.
-	if flags.Regabi {
-		flags.RegabiWrappers = true
-		flags.RegabiG = true
-		flags.RegabiReflect = true
-		flags.RegabiDefer = true
-		// Not ready yet:
-		//flags.RegabiArgs = true
 	}
 	// Check regabi dependencies.
 	if flags.RegabiG && !flags.RegabiWrappers {
@@ -148,4 +154,10 @@ func GOEXPERIMENT() string {
 // lower-cased experiment names.
 func EnabledExperiments() []string {
 	return expList(&Experiment, nil, false)
+}
+
+// AllExperiments returns a list of all experiment settings.
+// Disabled experiments appear in the list prefixed by "no".
+func AllExperiments() []string {
+	return expList(&Experiment, nil, true)
 }
