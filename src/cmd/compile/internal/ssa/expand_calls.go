@@ -508,7 +508,7 @@ func (x *expandState) rewriteSelect(leaf *Value, selector *Value, offset int64, 
 		ls := x.rewriteSelect(leaf, selector.Args[0], offset, regOffset)
 		locs = x.splitSlots(ls, ".ptr", 0, x.typs.BytePtr)
 
-	case OpSlicePtr:
+	case OpSlicePtr, OpSlicePtrUnchecked:
 		w := selector.Args[0]
 		ls := x.rewriteSelect(leaf, w, offset, regOffset)
 		locs = x.splitSlots(ls, ".ptr", 0, types.NewPtr(w.Type.Elem()))
@@ -1202,7 +1202,7 @@ func expandCalls(f *Func) {
 			case OpStructSelect, OpArraySelect,
 				OpIData, OpITab,
 				OpStringPtr, OpStringLen,
-				OpSlicePtr, OpSliceLen, OpSliceCap,
+				OpSlicePtr, OpSliceLen, OpSliceCap, OpSlicePtrUnchecked,
 				OpComplexReal, OpComplexImag,
 				OpInt64Hi, OpInt64Lo:
 				w := v.Args[0]
@@ -1450,15 +1450,17 @@ func expandCalls(f *Func) {
 
 	// Step 6: elide any copies introduced.
 	// Update named values.
-	for _, name := range f.Names {
-		values := f.NamedValues[name]
-		for i, v := range values {
-			if v.Op == OpCopy {
-				a := v.Args[0]
-				for a.Op == OpCopy {
-					a = a.Args[0]
+	if false { // TODO: reeanable. It caused compiler OOMing on large input.
+		for _, name := range f.Names {
+			values := f.NamedValues[name]
+			for i, v := range values {
+				if v.Op == OpCopy {
+					a := v.Args[0]
+					for a.Op == OpCopy {
+						a = a.Args[0]
+					}
+					values[i] = a
 				}
-				values[i] = a
 			}
 		}
 	}
