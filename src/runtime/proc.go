@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"internal/abi"
 	"internal/cpu"
 	"internal/goexperiment"
 	"runtime/internal/atomic"
@@ -697,6 +698,11 @@ func schedinit() {
 	sigsave(&_g_.m.sigmask)
 	initSigmask = _g_.m.sigmask
 
+	if offset := unsafe.Offsetof(sched.timeToRun); offset%8 != 0 {
+		println(offset)
+		throw("sched.timeToRun not aligned to 8 bytes")
+	}
+
 	goargs()
 	goenvs()
 	parsedebugvars()
@@ -971,6 +977,37 @@ func casgstatus(gp *g, oldval, newval uint32) {
 		} else {
 			osyield()
 			nextYield = nanotime() + yieldDelay/2
+		}
+	}
+
+	// Handle tracking for scheduling latencies.
+	if oldval == _Grunning {
+		// Track every 8th time a goroutine transitions out of running.
+		if gp.trackingSeq%gTrackingPeriod == 0 {
+			gp.tracking = true
+		}
+		gp.trackingSeq++
+	}
+	if gp.tracking {
+		now := nanotime()
+		if oldval == _Grunnable {
+			// We transitioned out of runnable, so measure how much
+			// time we spent in this state and add it to
+			// runnableTime.
+			gp.runnableTime += now - gp.runnableStamp
+			gp.runnableStamp = 0
+		}
+		if newval == _Grunnable {
+			// We just transitioned into runnable, so record what
+			// time that happened.
+			gp.runnableStamp = now
+		} else if newval == _Grunning {
+			// We're transitioning into running, so turn off
+			// tracking and record how much time we spent in
+			// runnable.
+			gp.tracking = false
+			sched.timeToRun.record(gp.runnableTime)
+			gp.runnableTime = 0
 		}
 	}
 }
@@ -1986,7 +2023,7 @@ func oneNewExtraM() {
 	// the goroutine stack ends.
 	mp := allocm(nil, nil, -1)
 	gp := malg(4096)
-	gp.sched.pc = funcPC(goexit) + sys.PCQuantum
+	gp.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum
 	gp.sched.sp = gp.stack.hi
 	gp.sched.sp -= 4 * sys.PtrSize // extra space in case of reads slightly beyond frame
 	gp.sched.lr = 0
@@ -4274,7 +4311,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched))
 	newg.sched.sp = sp
 	newg.stktopsp = sp
-	newg.sched.pc = funcPC(goexit) + sys.PCQuantum // +PCQuantum so that previous instruction is in same function
+	newg.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum // +PCQuantum so that previous instruction is in same function
 	newg.sched.g = guintptr(unsafe.Pointer(newg))
 	gostartcallfn(&newg.sched, fn)
 	newg.gopc = callerpc
@@ -4285,6 +4322,11 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	}
 	if isSystemGoroutine(newg, false) {
 		atomic.Xadd(&sched.ngsys, +1)
+	}
+	// Track initial transition?
+	newg.trackingSeq = uint8(fastrand())
+	if newg.trackingSeq%gTrackingPeriod == 0 {
+		newg.tracking = true
 	}
 	casgstatus(newg, _Gdead, _Grunnable)
 
