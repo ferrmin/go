@@ -4104,7 +4104,10 @@ func exitsyscall0(gp *g) {
 	schedule() // Never returns.
 }
 
-func beforefork() {
+// Called from syscall package before fork.
+//go:linkname syscall_runtime_BeforeFork syscall.runtime_BeforeFork
+//go:nosplit
+func syscall_runtime_BeforeFork() {
 	gp := getg().m.curg
 
 	// Block signals during a fork, so that the child does not run
@@ -4121,14 +4124,10 @@ func beforefork() {
 	gp.stackguard0 = stackFork
 }
 
-// Called from syscall package before fork.
-//go:linkname syscall_runtime_BeforeFork syscall.runtime_BeforeFork
+// Called from syscall package after fork in parent.
+//go:linkname syscall_runtime_AfterFork syscall.runtime_AfterFork
 //go:nosplit
-func syscall_runtime_BeforeFork() {
-	systemstack(beforefork)
-}
-
-func afterfork() {
+func syscall_runtime_AfterFork() {
 	gp := getg().m.curg
 
 	// See the comments in beforefork.
@@ -4137,13 +4136,6 @@ func afterfork() {
 	msigrestore(gp.m.sigmask)
 
 	gp.m.locks--
-}
-
-// Called from syscall package after fork in parent.
-//go:linkname syscall_runtime_AfterFork syscall.runtime_AfterFork
-//go:nosplit
-func syscall_runtime_AfterFork() {
-	systemstack(afterfork)
 }
 
 // inForkedChild is true while manipulating signals in the child process.
@@ -4619,7 +4611,7 @@ func sigprof(pc, sp, lr uintptr, gp *g, mp *m) {
 		return
 	}
 
-	// On mips{,le}, 64bit atomics are emulated with spinlocks, in
+	// On mips{,le}/arm, 64bit atomics are emulated with spinlocks, in
 	// runtime/internal/atomic. If SIGPROF arrives while the program is inside
 	// the critical section, it creates a deadlock (when writing the sample).
 	// As a workaround, create a counter of SIGPROFs while in critical section
@@ -4631,6 +4623,13 @@ func sigprof(pc, sp, lr uintptr, gp *g, mp *m) {
 				cpuprof.lostAtomic++
 				return
 			}
+		}
+		if GOARCH == "arm" && goarm < 7 && GOOS == "linux" && pc&0xffff0000 == 0xffff0000 {
+			// runtime/internal/atomic functions call into kernel
+			// helpers on arm < 7. See
+			// runtime/internal/atomic/sys_linux_arm.s.
+			cpuprof.lostAtomic++
+			return
 		}
 	}
 
