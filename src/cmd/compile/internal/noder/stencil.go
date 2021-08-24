@@ -304,6 +304,11 @@ func (g *irgen) buildClosure(outer *ir.Func, x ir.Node) ir.Node {
 		// of se.Selection, since that will be the type that actually has
 		// the method.
 		recv := deref(se.Selection.Type.Recv().Type)
+		if len(recv.RParams()) == 0 {
+			// The embedded type that actually has the method is not
+			// actually generic, so no need to build a closure.
+			return x
+		}
 		baseType := recv.OrigSym.Def.Type()
 		var gf *ir.Name
 		for _, m := range baseType.Methods().Slice() {
@@ -491,6 +496,9 @@ func (g *irgen) instantiateMethods() {
 		baseSym := typ.OrigSym
 		baseType := baseSym.Def.(*ir.Name).Type()
 		for j, _ := range typ.Methods().Slice() {
+			if baseType.Methods().Slice()[j].Nointerface() {
+				typ.Methods().Slice()[j].SetNointerface(true)
+			}
 			baseNname := baseType.Methods().Slice()[j].Nname.(*ir.Name)
 			// Eagerly generate the instantiations and dictionaries that implement these methods.
 			// We don't use the instantiations here, just generate them (and any
@@ -1029,7 +1037,7 @@ func (subst *subster) node(n ir.Node) ir.Node {
 				name := call.X.Name()
 				if name.BuiltinOp != ir.OXXX {
 					switch name.BuiltinOp {
-					case ir.OMAKE, ir.OREAL, ir.OIMAG, ir.OAPPEND, ir.ODELETE:
+					case ir.OMAKE, ir.OREAL, ir.OIMAG, ir.OAPPEND, ir.ODELETE, ir.OALIGNOF, ir.OOFFSETOF, ir.OSIZEOF:
 						// Transform these builtins now that we
 						// know the type of the args.
 						m = transformBuiltin(call)
@@ -1079,13 +1087,25 @@ func (subst *subster) node(n ir.Node) ir.Node {
 			ir.FinishCaptureNames(oldfn.Pos(), saveNewf, newfn)
 			newfn.ClosureVars = append(newfn.ClosureVars, subst.namelist(oldfn.ClosureVars)...)
 
+			// Copy that closure variable to a local one.
+			// Note: this allows the dictionary to be captured by child closures.
+			// See issue 47723.
+			ldict := ir.NewNameAt(x.Pos(), subst.info.gf.Sym().Pkg.Lookup(".dict"))
+			typed(types.Types[types.TUINTPTR], ldict)
+			ldict.Class = ir.PAUTO
+			ldict.Curfn = newfn
+			newfn.Dcl = append(newfn.Dcl, ldict)
+			as := ir.NewAssignStmt(x.Pos(), ldict, cdict)
+			as.SetTypecheck(1)
+			newfn.Body.Append(as)
+
 			// Create inst info for the instantiated closure. The dict
 			// param is the closure variable for the dictionary of the
 			// outer function. Since the dictionary is shared, use the
 			// same entries for startSubDict, dictLen, dictEntryMap.
 			cinfo := &instInfo{
 				fun:           newfn,
-				dictParam:     cdict,
+				dictParam:     ldict,
 				gf:            subst.info.gf,
 				gfInfo:        subst.info.gfInfo,
 				startSubDict:  subst.info.startSubDict,
@@ -1102,7 +1122,7 @@ func (subst *subster) node(n ir.Node) ir.Node {
 			outerinfo := subst.info
 			subst.info = cinfo
 			// Make sure type of closure function is set before doing body.
-			newfn.Body = subst.list(oldfn.Body)
+			newfn.Body.Append(subst.list(oldfn.Body)...)
 			subst.info = outerinfo
 			subst.newf = saveNewf
 			ir.CurFunc = saveNewf
@@ -1559,12 +1579,17 @@ func (g *irgen) finalizeSyms() {
 func (g *irgen) getDictionaryValue(gf *ir.Name, targs []*types.Type, isMeth bool) ir.Node {
 	sym := g.getDictionarySym(gf, targs, isMeth)
 
-	// Make a node referencing the dictionary symbol.
-	n := typecheck.NewName(sym)
-	n.SetType(types.Types[types.TUINTPTR]) // should probably be [...]uintptr, but doesn't really matter
-	n.SetTypecheck(1)
-	n.Class = ir.PEXTERN
-	sym.Def = n
+	// Make (or reuse) a node referencing the dictionary symbol.
+	var n *ir.Name
+	if sym.Def != nil {
+		n = sym.Def.(*ir.Name)
+	} else {
+		n = typecheck.NewName(sym)
+		n.SetType(types.Types[types.TUINTPTR]) // should probably be [...]uintptr, but doesn't really matter
+		n.SetTypecheck(1)
+		n.Class = ir.PEXTERN
+		sym.Def = n
+	}
 
 	// Return the address of the dictionary.
 	np := typecheck.NodAddr(n)
