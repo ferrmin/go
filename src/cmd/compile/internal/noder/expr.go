@@ -50,6 +50,8 @@ func (g *irgen) expr(expr syntax.Expr) ir.Node {
 		base.FatalfAt(g.pos(expr), "unrecognized type-checker result")
 	}
 
+	base.Assert(g.exprStmtOK)
+
 	// The gc backend expects all expressions to have a concrete type, and
 	// types2 mostly satisfies this expectation already. But there are a few
 	// cases where the Go spec doesn't require converting to concrete type,
@@ -116,12 +118,12 @@ func (g *irgen) expr0(typ types2.Type, expr syntax.Expr) ir.Node {
 		// The key for the Inferred map is the CallExpr (if inferring
 		// types required the function arguments) or the IndexExpr below
 		// (if types could be inferred without the function arguments).
-		if inferred, ok := g.info.Inferred[expr]; ok && len(inferred.TArgs) > 0 {
+		if inferred, ok := g.info.Inferred[expr]; ok && inferred.TArgs.Len() > 0 {
 			// This is the case where inferring types required the
 			// types of the function arguments.
-			targs := make([]ir.Node, len(inferred.TArgs))
-			for i, targ := range inferred.TArgs {
-				targs[i] = ir.TypeNode(g.typ(targ))
+			targs := make([]ir.Node, inferred.TArgs.Len())
+			for i := range targs {
+				targs[i] = ir.TypeNode(g.typ(inferred.TArgs.At(i)))
 			}
 			if fun.Op() == ir.OFUNCINST {
 				// Replace explicit type args with the full list that
@@ -149,13 +151,13 @@ func (g *irgen) expr0(typ types2.Type, expr syntax.Expr) ir.Node {
 	case *syntax.IndexExpr:
 		var targs []ir.Node
 
-		if inferred, ok := g.info.Inferred[expr]; ok && len(inferred.TArgs) > 0 {
+		if inferred, ok := g.info.Inferred[expr]; ok && inferred.TArgs.Len() > 0 {
 			// This is the partial type inference case where the types
 			// can be inferred from other type arguments without using
 			// the types of the function arguments.
-			targs = make([]ir.Node, len(inferred.TArgs))
-			for i, targ := range inferred.TArgs {
-				targs[i] = ir.TypeNode(g.typ(targ))
+			targs = make([]ir.Node, inferred.TArgs.Len())
+			for i := range targs {
+				targs[i] = ir.TypeNode(g.typ(inferred.TArgs.At(i)))
 			}
 		} else if _, ok := expr.Index.(*syntax.ListExpr); ok {
 			targs = g.exprList(expr.Index)
@@ -360,9 +362,9 @@ func (g *irgen) selectorExpr(pos src.XPos, typ types2.Type, expr *syntax.Selecto
 				// selinfo.Targs() are the types used to
 				// instantiate the type of receiver
 				targs2 := getTargs(selinfo)
-				targs := make([]ir.Node, len(targs2))
-				for i, targ2 := range targs2 {
-					targs[i] = ir.TypeNode(g.typ(targ2))
+				targs := make([]ir.Node, targs2.Len())
+				for i := range targs {
+					targs[i] = ir.TypeNode(g.typ(targs2.At(i)))
 				}
 
 				// Create function instantiation with the type
@@ -386,7 +388,7 @@ func (g *irgen) selectorExpr(pos src.XPos, typ types2.Type, expr *syntax.Selecto
 }
 
 // getTargs gets the targs associated with the receiver of a selected method
-func getTargs(selinfo *types2.Selection) []types2.Type {
+func getTargs(selinfo *types2.Selection) *types2.TypeList {
 	r := deref2(selinfo.Recv())
 	n := types2.AsNamed(r)
 	if n == nil {

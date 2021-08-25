@@ -15,11 +15,11 @@ type substMap map[*TypeParam]Type
 
 // makeSubstMap creates a new substitution map mapping tpars[i] to targs[i].
 // If targs[i] is nil, tpars[i] is not substituted.
-func makeSubstMap(tpars []*TypeName, targs []Type) substMap {
+func makeSubstMap(tpars []*TypeParam, targs []Type) substMap {
 	assert(len(tpars) == len(targs))
 	proj := make(substMap, len(tpars))
 	for i, tpar := range tpars {
-		proj[tpar.typ.(*TypeParam)] = targs[i]
+		proj[tpar] = targs[i]
 	}
 	return proj
 }
@@ -188,21 +188,21 @@ func (subst *subster) typ(typ Type) Type {
 		}
 
 		var newTArgs []Type
-		assert(len(t.targs) == t.TParams().Len())
+		assert(t.targs.Len() == t.TParams().Len())
 
 		// already instantiated
 		dump(">>> %s already instantiated", t)
 		// For each (existing) type argument targ, determine if it needs
 		// to be substituted; i.e., if it is or contains a type parameter
 		// that has a type argument for it.
-		for i, targ := range t.targs {
+		for i, targ := range t.targs.list() {
 			dump(">>> %d targ = %s", i, targ)
 			new_targ := subst.typ(targ)
 			if new_targ != targ {
 				dump(">>> substituted %d targ %s => %s", i, targ, new_targ)
 				if newTArgs == nil {
 					newTArgs = make([]Type, t.TParams().Len())
-					copy(newTArgs, t.targs)
+					copy(newTArgs, t.targs.list())
 				}
 				newTArgs[i] = new_targ
 			}
@@ -230,7 +230,7 @@ func (subst *subster) typ(typ Type) Type {
 		// It's ok to provide a nil *Checker because the newly created type
 		// doesn't need to be (lazily) expanded; it's expanded below.
 		named := (*Checker)(nil).newNamed(tname, t.orig, nil, t.tparams, t.methods) // t is loaded, so tparams and methods are available
-		named.targs = newTArgs
+		named.targs = NewTypeList(newTArgs)
 		subst.typMap[h] = named
 		t.expand(subst.typMap) // must happen after typMap update to avoid infinite recursion
 
