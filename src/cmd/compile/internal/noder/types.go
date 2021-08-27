@@ -22,7 +22,7 @@ func (g *irgen) pkg(pkg *types2.Package) *types.Pkg {
 	case g.self:
 		return types.LocalPkg
 	case types2.Unsafe:
-		return ir.Pkgs.Unsafe
+		return types.UnsafePkg
 	}
 	return types.NewPkg(pkg.Path(), pkg.Name())
 }
@@ -118,9 +118,14 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 				return s.Def.Type()
 			}
 
+			// Make sure the base generic type exists in type1 (it may
+			// not yet if we are referecing an imported generic type, as
+			// opposed to a generic type declared in this package).
+			_ = g.obj(typ.Orig().Obj())
+
 			// Create a forwarding type first and put it in the g.typs
 			// map, in order to deal with recursive generic types
-			// (including via method signatures).. Set up the extra
+			// (including via method signatures). Set up the extra
 			// ntyp information (Def, RParams, which may set
 			// HasTParam) before translating the underlying type
 			// itself, so we handle recursion correctly.
@@ -201,7 +206,7 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 		methods := make([]*types.Field, typ.NumExplicitMethods())
 		for i := range methods {
 			m := typ.ExplicitMethod(i)
-			mtyp := g.signature(typecheck.FakeRecv(), m.Type().(*types2.Signature))
+			mtyp := g.signature(types.FakeRecv(), m.Type().(*types2.Signature))
 			methods[i] = types.NewField(g.pos(m), g.selector(m), mtyp)
 		}
 
