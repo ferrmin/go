@@ -214,7 +214,7 @@ func (subst *subster) typ(typ Type) Type {
 		}
 
 		// before creating a new named type, check if we have this one already
-		h := instantiatedHash(t, newTArgs)
+		h := typeHash(t, newTArgs)
 		dump(">>> new type hash: %s", h)
 		if named, found := subst.typMap[h]; found {
 			dump(">>> found %s", named)
@@ -253,32 +253,33 @@ func (subst *subster) typ(typ Type) Type {
 	return typ
 }
 
-var instanceHashing = 0
-
-func instantiatedHash(typ *Named, targs []Type) string {
-	assert(instanceHashing == 0)
-	instanceHashing++
+// typeHash returns a string representation of typ, which can be used as an exact
+// type hash: types that are identical produce identical string representations.
+// If typ is a *Named type and targs is not empty, typ is printed as if it were
+// instantiated with targs.
+func typeHash(typ Type, targs []Type) string {
+	assert(typ != nil)
 	var buf bytes.Buffer
-	writeTypeName(&buf, typ.obj, nil)
-	buf.WriteByte('[')
-	writeTypeList(&buf, targs, nil, nil)
-	buf.WriteByte(']')
-	instanceHashing--
 
-	// With respect to the represented type, whether a
-	// type is fully expanded or stored as instance
-	// does not matter - they are the same types.
-	// Remove the instanceMarkers printed for instances.
-	res := buf.Bytes()
-	i := 0
-	for _, b := range res {
-		if b != instanceMarker {
-			res[i] = b
-			i++
+	h := newTypeHasher(&buf)
+	if named, _ := typ.(*Named); named != nil && len(targs) > 0 {
+		// Don't use WriteType because we need to use the provided targs
+		// and not any targs that might already be with the *Named type.
+		h.typeName(named.obj)
+		h.typeList(targs)
+	} else {
+		assert(targs == nil)
+		h.typ(typ)
+	}
+
+	if debug {
+		// there should be no instance markers in type hashes
+		for _, b := range buf.Bytes() {
+			assert(b != instanceMarker)
 		}
 	}
 
-	return string(res[:i])
+	return buf.String()
 }
 
 // typOrNil is like typ but if the argument is nil it is replaced with Typ[Invalid].

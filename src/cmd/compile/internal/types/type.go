@@ -1060,7 +1060,7 @@ func (t *Type) SetFields(fields []*Field) {
 	// Rather than try to track and invalidate those,
 	// enforce that SetFields cannot be called once
 	// t's width has been calculated.
-	if t.WidthCalculated() {
+	if t.widthCalculated() {
 		base.Fatalf("SetFields of %v: width previously calculated", t)
 	}
 	t.wantEtype(TSTRUCT)
@@ -1082,10 +1082,6 @@ func (t *Type) SetFields(fields []*Field) {
 func (t *Type) SetInterface(methods []*Field) {
 	t.wantEtype(TINTER)
 	t.Methods().Set(methods)
-}
-
-func (t *Type) WidthCalculated() bool {
-	return t.align > 0
 }
 
 // ArgWidth returns the total aligned argument size for a function.
@@ -1678,19 +1674,6 @@ func (t *Type) IsUntyped() bool {
 // Note that this function ignores pointers to go:notinheap types.
 func (t *Type) HasPointers() bool {
 	return PtrDataSize(t) > 0
-}
-
-// Tie returns 'T' if t is a concrete type,
-// 'I' if t is an interface type, and 'E' if t is an empty interface type.
-// It is used to build calls to the conv* and assert* runtime routines.
-func (t *Type) Tie() byte {
-	if t.IsEmptyInterface() {
-		return 'E'
-	}
-	if t.IsInterface() {
-		return 'I'
-	}
-	return 'T'
 }
 
 var recvType *Type

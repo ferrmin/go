@@ -33,27 +33,18 @@ const (
 	// tests outside of the main module.
 	narrowAllVersionV = "v1.16"
 
-	// lazyLoadingVersionV is the Go version (plus leading "v") at which a
+	// explicitIndirectVersionV is the Go version (plus leading "v") at which a
 	// module's go.mod file is expected to list explicit requirements on every
 	// module that provides any package transitively imported by that module.
-	lazyLoadingVersionV = "v1.17"
+	//
+	// Other indirect dependencies of such a module can be safely pruned out of
+	// the module graph; see https://golang.org/ref/mod#graph-pruning.
+	explicitIndirectVersionV = "v1.17"
 
 	// separateIndirectVersionV is the Go version (plus leading "v") at which
 	// "// indirect" dependencies are added in a block separate from the direct
 	// ones. See https://golang.org/issue/45965.
 	separateIndirectVersionV = "v1.17"
-)
-
-const (
-	// go117EnableLazyLoading toggles whether lazy-loading code paths should be
-	// active. It will be removed once the lazy loading implementation is stable
-	// and well-tested.
-	go117EnableLazyLoading = true
-
-	// go1117LazyTODO is a constant that exists only until lazy loading is
-	// implemented. Its use indicates a condition that will need to change if the
-	// main module is lazy.
-	go117LazyTODO = false
 )
 
 // modFileGoVersion returns the (non-empty) Go version at which the requirements
@@ -69,9 +60,9 @@ func modFileGoVersion(modFile *modfile.File) string {
 		// has been erroneously hand-edited.
 		//
 		// The semantics of the go.mod file are more-or-less the same from Go 1.11
-		// through Go 1.16, changing at 1.17 for lazy loading. So even though a
-		// go.mod file without a 'go' directive is theoretically a Go 1.11 file,
-		// scripts may assume that it ends up as a Go 1.16 module.
+		// through Go 1.16, changing at 1.17 to support module graph pruning.
+		// So even though a go.mod file without a 'go' directive is theoretically a
+		// Go 1.11 file, scripts may assume that it ends up as a Go 1.16 module.
 		return "1.16"
 	}
 	return modFile.Go.Version
@@ -94,22 +85,23 @@ type requireMeta struct {
 	indirect bool
 }
 
-// A modDepth indicates which dependencies should be loaded for a go.mod file.
-type modDepth uint8
+// A modPruning indicates whether transitive dependencies of Go 1.17 dependencies
+// are pruned out of the module subgraph rooted at a given module.
+// (See https://golang.org/ref/mod#graph-pruning.)
+type modPruning uint8
 
 const (
-	lazy  modDepth = iota // load dependencies only as needed
-	eager                 // load all transitive dependencies eagerly
+	pruned   modPruning = iota // transitive dependencies of modules at go 1.17 and higher are pruned out
+	unpruned                   // no transitive dependencies are pruned out
 )
 
-func modDepthFromGoVersion(goVersion string) modDepth {
-	if !go117EnableLazyLoading {
-		return eager
+func pruningForGoVersion(goVersion string) modPruning {
+	if semver.Compare("v"+goVersion, explicitIndirectVersionV) < 0 {
+		// The go.mod file does not duplicate relevant information about transitive
+		// dependencies, so they cannot be pruned out.
+		return unpruned
 	}
-	if semver.Compare("v"+goVersion, lazyLoadingVersionV) < 0 {
-		return eager
-	}
-	return lazy
+	return pruned
 }
 
 // CheckAllowed returns an error equivalent to ErrDisallowed if m is excluded by
@@ -483,7 +475,7 @@ var rawGoVersion sync.Map // map[module.Version]string
 type modFileSummary struct {
 	module     module.Version
 	goVersion  string
-	depth      modDepth
+	pruning    modPruning
 	require    []module.Version
 	retract    []retraction
 	deprecated string
@@ -635,9 +627,9 @@ func rawGoModSummary(m module.Version, replacedFrom string) (*modFileSummary, er
 		if f.Go != nil && f.Go.Version != "" {
 			rawGoVersion.LoadOrStore(m, f.Go.Version)
 			summary.goVersion = f.Go.Version
-			summary.depth = modDepthFromGoVersion(f.Go.Version)
+			summary.pruning = pruningForGoVersion(f.Go.Version)
 		} else {
-			summary.depth = eager
+			summary.pruning = unpruned
 		}
 		if len(f.Require) > 0 {
 			summary.require = make([]module.Version, 0, len(f.Require))

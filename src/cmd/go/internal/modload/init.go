@@ -625,7 +625,7 @@ func loadModFile(ctx context.Context) (rs *Requirements, needCommit bool) {
 		MainModules = makeMainModules([]module.Version{mainModule}, []string{""}, []*modfile.File{nil}, []*modFileIndex{nil}, "")
 		goVersion := LatestGoVersion()
 		rawGoVersion.Store(mainModule, goVersion)
-		requirements = newRequirements(modDepthFromGoVersion(goVersion), nil, nil)
+		requirements = newRequirements(pruningForGoVersion(goVersion), nil, nil)
 		return requirements, false
 	}
 
@@ -709,17 +709,16 @@ func loadModFile(ctx context.Context) (rs *Requirements, needCommit bool) {
 		// cfg.CmdName directly here.
 		if cfg.BuildMod == "mod" && cfg.CmdName != "mod graph" && cfg.CmdName != "mod why" {
 			addGoStmt(MainModules.ModFile(mainModule), mainModule, LatestGoVersion())
-			if go117EnableLazyLoading {
-				// We need to add a 'go' version to the go.mod file, but we must assume
-				// that its existing contents match something between Go 1.11 and 1.16.
-				// Go 1.11 through 1.16 have eager requirements, but the latest Go
-				// version uses lazy requirements instead — so we need to cnvert the
-				// requirements to be lazy.
-				var err error
-				rs, err = convertDepth(ctx, rs, lazy)
-				if err != nil {
-					base.Fatalf("go: %v", err)
-				}
+
+			// We need to add a 'go' version to the go.mod file, but we must assume
+			// that its existing contents match something between Go 1.11 and 1.16.
+			// Go 1.11 through 1.16 do not support graph pruning, but the latest Go
+			// version uses a pruned module graph — so we need to convert the
+			// requirements to support pruning.
+			var err error
+			rs, err = convertPruning(ctx, rs, pruned)
+			if err != nil {
+				base.Fatalf("go: %v", err)
 			}
 		} else {
 			rawGoVersion.Store(mainModule, modFileGoVersion(MainModules.ModFile(mainModule)))
@@ -979,7 +978,7 @@ func requirementsFromModFiles(ctx context.Context, modFiles []*modfile.File) *Re
 		}
 	}
 	module.Sort(roots)
-	rs := newRequirements(modDepthFromGoVersion(MainModules.GoVersion()), roots, direct)
+	rs := newRequirements(pruningForGoVersion(MainModules.GoVersion()), roots, direct)
 	return rs
 }
 
@@ -1486,12 +1485,13 @@ func keepSums(ctx context.Context, ld *loader, rs *Requirements, which whichSums
 				continue
 			}
 
-			if rs.depth == lazy && pkg.mod.Path != "" {
+			if rs.pruning == pruned && pkg.mod.Path != "" {
 				if v, ok := rs.rootSelected(pkg.mod.Path); ok && v == pkg.mod.Version {
-					// pkg was loaded from a root module, and because the main module is
-					// lazy we do not check non-root modules for conflicts for packages
-					// that can be found in roots. So we only need the checksums for the
-					// root modules that may contain pkg, not all possible modules.
+					// pkg was loaded from a root module, and because the main module has
+					// a pruned module graph we do not check non-root modules for
+					// conflicts for packages that can be found in roots. So we only need
+					// the checksums for the root modules that may contain pkg, not all
+					// possible modules.
 					for prefix := pkg.path; prefix != "."; prefix = path.Dir(prefix) {
 						if v, ok := rs.rootSelected(prefix); ok && v != "none" {
 							m := module.Version{Path: prefix, Version: v}
@@ -1515,8 +1515,7 @@ func keepSums(ctx context.Context, ld *loader, rs *Requirements, which whichSums
 	}
 
 	if rs.graph.Load() == nil {
-		// The module graph was not loaded, possibly because the main module is lazy
-		// or possibly because we haven't needed to load the graph yet.
+		// We haven't needed to load the module graph so far.
 		// Save sums for the root modules (or their replacements), but don't
 		// incur the cost of loading the graph just to find and retain the sums.
 		for _, m := range rs.rootModules {
