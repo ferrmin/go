@@ -362,7 +362,7 @@ func (pr *pkgReader2) objIdx(idx int) (*types2.Package, string) {
 	tag := codeObj(rname.code(syncCodeObj))
 
 	if tag == objStub {
-		assert(objPkg == nil)
+		assert(objPkg == nil || objPkg == types2.Unsafe)
 		return objPkg, objName
 	}
 
