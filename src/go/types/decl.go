@@ -316,7 +316,7 @@ func (check *Checker) validType(typ Type, path []Object) typeInfo {
 		}
 
 	case *Named:
-		t.expand(check.typMap)
+		t.expand(check.conf.Environment)
 		// don't touch the type if it is from a different package or the Universe scope
 		// (doing so would lead to a race condition - was issue #35049)
 		if t.obj.pkg != check.pkg {
@@ -589,7 +589,7 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *ast.TypeSpec, def *Named) {
 	})
 
 	alias := tdecl.Assign.IsValid()
-	if alias && tdecl.TParams.NumFields() != 0 {
+	if alias && tdecl.TypeParams.NumFields() != 0 {
 		// The parser will ensure this but we may still get an invalid AST.
 		// Complain and continue as regular type definition.
 		check.error(atPos(tdecl.Assign), 0, "generic type cannot be alias")
@@ -612,10 +612,10 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *ast.TypeSpec, def *Named) {
 	named := check.newNamed(obj, nil, nil, nil, nil)
 	def.setUnderlying(named)
 
-	if tdecl.TParams != nil {
+	if tdecl.TypeParams != nil {
 		check.openScope(tdecl, "type parameters")
 		defer check.closeScope()
-		named.tparams = check.collectTypeParams(tdecl.TParams)
+		named.tparams = check.collectTypeParams(tdecl.TypeParams)
 	}
 
 	// determine underlying type of named
@@ -641,13 +641,13 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *ast.TypeSpec, def *Named) {
 	named.underlying = under(named)
 
 	// If the RHS is a type parameter, it must be from this type declaration.
-	if tpar, _ := named.underlying.(*TypeParam); tpar != nil && tparamIndex(named.TParams().list(), tpar) < 0 {
+	if tpar, _ := named.underlying.(*TypeParam); tpar != nil && tparamIndex(named.TypeParams().list(), tpar) < 0 {
 		check.errorf(tdecl.Type, _Todo, "cannot use function type parameter %s as RHS in type declaration", tpar)
 		named.underlying = Typ[Invalid]
 	}
 }
 
-func (check *Checker) collectTypeParams(list *ast.FieldList) *TParamList {
+func (check *Checker) collectTypeParams(list *ast.FieldList) *TypeParamList {
 	var tparams []*TypeParam
 	// Declare type parameters up-front, with empty interface as type bound.
 	// The scope of type parameters starts at the beginning of the type parameter
@@ -677,7 +677,7 @@ func (check *Checker) collectTypeParams(list *ast.FieldList) *TParamList {
 func (check *Checker) declareTypeParams(tparams []*TypeParam, names []*ast.Ident) []*TypeParam {
 	for _, name := range names {
 		tname := NewTypeName(name.Pos(), check.pkg, name.Name, nil)
-		tpar := check.NewTypeParam(tname, &emptyInterface)       // assigns type to tpar as a side-effect
+		tpar := check.newTypeParam(tname, &emptyInterface)       // assigns type to tpar as a side-effect
 		check.declare(check.scope, name, tname, check.scope.pos) // TODO(gri) check scope position
 		tparams = append(tparams, tpar)
 	}
@@ -791,7 +791,7 @@ func (check *Checker) funcDecl(obj *Func, decl *declInfo) {
 	check.funcType(sig, fdecl.Recv, fdecl.Type)
 	obj.color_ = saved
 
-	if fdecl.Type.TParams.NumFields() > 0 && fdecl.Body == nil {
+	if fdecl.Type.TypeParams.NumFields() > 0 && fdecl.Body == nil {
 		check.softErrorf(fdecl.Name, _Todo, "parameterized function is missing function body")
 	}
 
