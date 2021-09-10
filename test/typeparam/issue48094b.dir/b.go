@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package p
+package b
 
-// don't crash
-func T /* ERROR missing */ [P] /* ERROR missing */ m /* ERROR unexpected */ () /* ERROR \) */ { /* ERROR { */ } /* ERROR } */
+import "./a"
+
+func H() { a.F() }
