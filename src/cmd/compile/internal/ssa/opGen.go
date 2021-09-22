@@ -1033,6 +1033,14 @@ const (
 	OpAMD64ORLlock
 	OpAMD64PrefetchT0
 	OpAMD64PrefetchNTA
+	OpAMD64ANDNQ
+	OpAMD64ANDNL
+	OpAMD64BLSIQ
+	OpAMD64BLSIL
+	OpAMD64BLSMSKQ
+	OpAMD64BLSMSKL
+	OpAMD64BLSRQ
+	OpAMD64BLSRL
 
 	OpARMADD
 	OpARMADDconst
@@ -13625,6 +13633,120 @@ var opcodeTable = [...]opInfo{
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 4295032831}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+		},
+	},
+	{
+		name:         "ANDNQ",
+		argLen:       2,
+		clobberFlags: true,
+		asm:          x86.AANDNQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "ANDNL",
+		argLen:       2,
+		clobberFlags: true,
+		asm:          x86.AANDNL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "BLSIQ",
+		argLen:       1,
+		clobberFlags: true,
+		asm:          x86.ABLSIQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "BLSIL",
+		argLen:       1,
+		clobberFlags: true,
+		asm:          x86.ABLSIL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "BLSMSKQ",
+		argLen:       1,
+		clobberFlags: true,
+		asm:          x86.ABLSMSKQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "BLSMSKL",
+		argLen:       1,
+		clobberFlags: true,
+		asm:          x86.ABLSMSKL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "BLSRQ",
+		argLen:       1,
+		clobberFlags: true,
+		asm:          x86.ABLSRQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "BLSRL",
+		argLen:       1,
+		clobberFlags: true,
+		asm:          x86.ABLSRL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
 			},
 		},
 	},
@@ -37030,12 +37152,12 @@ var registersPPC64 = [...]Register{
 	{62, ppc64.REG_F30, -1, "F30"},
 	{63, ppc64.REG_F31, -1, "F31"},
 }
-var paramIntRegPPC64 = []int8(nil)
-var paramFloatRegPPC64 = []int8(nil)
+var paramIntRegPPC64 = []int8{3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17}
+var paramFloatRegPPC64 = []int8{33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}
 var gpRegMaskPPC64 = regMask(1073733624)
 var fpRegMaskPPC64 = regMask(576460743713488896)
 var specialRegMaskPPC64 = regMask(0)
-var framepointerRegPPC64 = int8(1)
+var framepointerRegPPC64 = int8(-1)
 var linkRegPPC64 = int8(-1)
 var registersRISCV64 = [...]Register{
 	{0, riscv.REG_X0, -1, "X0"},
