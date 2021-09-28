@@ -14,6 +14,7 @@ import (
 	"internal/buildcfg"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // pclntab holds the state needed for pclntab generation.
@@ -286,11 +287,35 @@ func walkFuncs(ctxt *Link, funcs []loader.Sym, f func(loader.Sym)) {
 func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[loader.Sym]uint32 {
 	nameOffsets := make(map[loader.Sym]uint32, state.nfunc)
 
+	// The name used by the runtime is the concatenation of the 3 returned strings.
+	// For regular functions, only one returned string is nonempty.
+	// For generic functions, we use three parts so that we can print everything
+	// within the outermost "[]" as "...".
+	nameParts := func(name string) (string, string, string) {
+		i := strings.IndexByte(name, '[')
+		if i < 0 {
+			return name, "", ""
+		}
+		// TODO: use LastIndexByte once the bootstrap compiler is >= Go 1.5.
+		j := len(name) - 1
+		for j > i && name[j] != ']' {
+			j--
+		}
+		if j <= i {
+			return name, "", ""
+		}
+		return name[:i], "[...]", name[j+1:]
+	}
+
 	// Write the null terminated strings.
 	writeFuncNameTab := func(ctxt *Link, s loader.Sym) {
 		symtab := ctxt.loader.MakeSymbolUpdater(s)
 		for s, off := range nameOffsets {
-			symtab.AddStringAt(int64(off), ctxt.loader.SymName(s))
+			a, b, c := nameParts(ctxt.loader.SymName(s))
+			o := int64(off)
+			o = symtab.AddStringAt(o, a)
+			o = symtab.AddStringAt(o, b)
+			_ = symtab.AddCStringAt(o, c)
 		}
 	}
 
@@ -298,7 +323,8 @@ func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[lo
 	var size int64
 	walkFuncs(ctxt, funcs, func(s loader.Sym) {
 		nameOffsets[s] = uint32(size)
-		size += int64(ctxt.loader.SymNameLen(s)) + 1 // NULL terminate
+		a, b, c := nameParts(ctxt.loader.SymName(s))
+		size += int64(len(a) + len(b) + len(c) + 1) // NULL terminate
 	})
 
 	state.funcnametab = state.addGeneratedSym(ctxt, "runtime.funcnametab", size, writeFuncNameTab)
@@ -525,7 +551,7 @@ type pclnSetUint func(*loader.SymbolBuilder, *sys.Arch, int64, uint64) int64
 //   1) the PC->func table.
 //   2) The entry points in the func objects.
 //   3) The funcdata.
-// (1) and (2) are handled in walkPCToFunc. (3) is handled in walkFuncdata.
+// (1) and (2) are handled in writePCToFunc. (3) is handled in writeFuncdata.
 //
 // After relocations, once we know where to write things in the output buffer,
 // we execute the second pass, which is actually writing the data.
@@ -560,7 +586,7 @@ func (state *pclntab) generateFunctab(ctxt *Link, funcs []loader.Sym, inlSyms ma
 		}
 
 		// Write the data.
-		writePcToFunc(ctxt, sb, funcs, startLocations, setAddr, (*loader.SymbolBuilder).SetUint)
+		writePCToFunc(ctxt, sb, funcs, startLocations, setAddr, (*loader.SymbolBuilder).SetUint)
 		writeFuncs(ctxt, sb, funcs, inlSyms, startLocations, cuOffsets, nameOffsets)
 		state.writeFuncData(ctxt, sb, funcs, inlSyms, startLocations, setAddr, (*loader.SymbolBuilder).SetUint)
 	}
@@ -585,7 +611,7 @@ func (state *pclntab) generateFunctab(ctxt *Link, funcs []loader.Sym, inlSyms ma
 		setAddr = (*loader.SymbolBuilder).SetAddrPlus
 	}
 	setUintNOP := func(*loader.SymbolBuilder, *sys.Arch, int64, uint64) int64 { return 0 }
-	writePcToFunc(ctxt, sb, funcs, startLocations, setAddr, setUintNOP)
+	writePCToFunc(ctxt, sb, funcs, startLocations, setAddr, setUintNOP)
 	if !useSymValue {
 		// Generate relocations for funcdata when externally linking.
 		state.writeFuncData(ctxt, sb, funcs, inlSyms, startLocations, setAddr, setUintNOP)
@@ -661,10 +687,10 @@ func (state pclntab) calculateFunctabSize(ctxt *Link, funcs []loader.Sym) (int64
 	return size, startLocations
 }
 
-// writePcToFunc writes the PC->func lookup table.
+// writePCToFunc writes the PC->func lookup table.
 // This function walks the pc->func lookup table, executing callbacks
 // to generate relocations and writing the values for the table.
-func writePcToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, startLocations []uint32, setAddr pclnSetAddr, setUint pclnSetUint) {
+func writePCToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, startLocations []uint32, setAddr pclnSetAddr, setUint pclnSetUint) {
 	ldr := ctxt.loader
 	var prevFunc loader.Sym
 	prevSect := ldr.SymSect(funcs[0])
@@ -749,8 +775,8 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 			fi.Preload()
 		}
 
-		// Note we skip the space for the entry value -- that's handled inn
-		// walkPCToFunc. We don't write it here, because it might require a
+		// Note we skip the space for the entry value -- that's handled in
+		// writePCToFunc. We don't write it here, because it might require a
 		// relocation.
 		off := startLocations[i] + uint32(ctxt.Arch.PtrSize) // entry
 
