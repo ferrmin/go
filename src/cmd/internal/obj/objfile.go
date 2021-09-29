@@ -381,7 +381,28 @@ func (w *writer) Hash(s *LSym) {
 	w.Bytes(b[:])
 }
 
+// contentHashSection returns a mnemonic for s's section.
+// The goal is to prevent content-addressability from moving symbols between sections.
+// contentHashSection only distinguishes between sets of sections for which this matters.
+// Allowing flexibility increases the effectiveness of content-addressibility.
+// But in some cases, such as doing addressing based on a base symbol,
+// we need to ensure that a symbol is always in a prticular section.
+// Some of these conditions are duplicated in cmd/link/internal/ld.(*Link).symtab.
+// TODO: instead of duplicating them, have the compiler decide where symbols go.
+func contentHashSection(s *LSym) byte {
+	name := s.Name
+	if s.IsPcdata() {
+		return 'P'
+	} else if strings.HasPrefix(name, "type.") {
+		return 'T'
+	}
+	return 0
+}
+
 func contentHash64(s *LSym) goobj.Hash64Type {
+	if contentHashSection(s) != 0 {
+		panic("short hash of non-default-section sym " + s.Name)
+	}
 	var b goobj.Hash64Type
 	copy(b[:], s.P)
 	return b
@@ -416,15 +437,10 @@ func (w *writer) contentHash(s *LSym) goobj.HashType {
 	// In this case, if the smaller symbol is alive, the larger is not kept unless
 	// needed.
 	binary.LittleEndian.PutUint64(tmp[:8], uint64(s.Size))
-	h.Write(tmp[:8])
+	// Some symbols require being in separate sections.
+	tmp[8] = contentHashSection(s)
+	h.Write(tmp[:9])
 
-	// Don't dedup type symbols with others, as they are in a different
-	// section.
-	if strings.HasPrefix(s.Name, "type.") {
-		h.Write([]byte{'T'})
-	} else {
-		h.Write([]byte{0})
-	}
 	// The compiler trims trailing zeros _sometimes_. We just do
 	// it always.
 	h.Write(bytes.TrimRight(s.P, "\x00"))
@@ -641,16 +657,6 @@ func nAuxSym(s *LSym) int {
 func genFuncInfoSyms(ctxt *Link) {
 	infosyms := make([]*LSym, 0, len(ctxt.Text))
 	hashedsyms := make([]*LSym, 0, 4*len(ctxt.Text))
-	preparePcSym := func(s *LSym) *LSym {
-		if s == nil {
-			return s
-		}
-		s.PkgIdx = goobj.PkgIdxHashed
-		s.SymIdx = int32(len(hashedsyms) + len(ctxt.hasheddefs))
-		s.Set(AttrIndexed, true)
-		hashedsyms = append(hashedsyms, s)
-		return s
-	}
 	var b bytes.Buffer
 	symidx := int32(len(ctxt.defs))
 	for _, s := range ctxt.Text {
@@ -665,13 +671,13 @@ func genFuncInfoSyms(ctxt *Link) {
 			FuncFlag: fn.FuncFlag,
 		}
 		pc := &fn.Pcln
-		o.Pcsp = makeSymRef(preparePcSym(pc.Pcsp))
-		o.Pcfile = makeSymRef(preparePcSym(pc.Pcfile))
-		o.Pcline = makeSymRef(preparePcSym(pc.Pcline))
-		o.Pcinline = makeSymRef(preparePcSym(pc.Pcinline))
+		o.Pcsp = makeSymRef(pc.Pcsp)
+		o.Pcfile = makeSymRef(pc.Pcfile)
+		o.Pcline = makeSymRef(pc.Pcline)
+		o.Pcinline = makeSymRef(pc.Pcinline)
 		o.Pcdata = make([]goobj.SymRef, len(pc.Pcdata))
 		for i, pcSym := range pc.Pcdata {
-			o.Pcdata[i] = makeSymRef(preparePcSym(pcSym))
+			o.Pcdata[i] = makeSymRef(pcSym)
 		}
 		o.Funcdataoff = make([]uint32, len(pc.Funcdataoff))
 		for i, x := range pc.Funcdataoff {
