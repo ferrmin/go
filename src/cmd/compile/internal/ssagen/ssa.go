@@ -318,6 +318,7 @@ func dvarint(x *obj.LSym, off int, v int64) int {
 //    - Offset of the closure value to call
 func (s *state) emitOpenDeferInfo() {
 	x := base.Ctxt.Lookup(s.curfn.LSym.Name + ".opendefer")
+	x.Set(obj.AttrContentAddressable, true)
 	s.curfn.LSym.Func().OpenCodedDeferInfo = x
 	off := 0
 	off = dvarint(x, off, -s.deferBitsTemp.FrameOffset())
@@ -3856,6 +3857,13 @@ func InitTables() {
 		},
 		all...)
 
+	addF("runtime", "publicationBarrier",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			s.vars[memVar] = s.newValue1(ssa.OpPubBarrier, types.TypeMem, s.mem())
+			return nil
+		},
+		sys.ARM64)
+
 	/******** runtime/internal/sys ********/
 	addF("runtime/internal/sys", "Ctz32",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
@@ -6537,6 +6545,7 @@ func emitArgInfo(e *ssafn, f *ssa.Func, pp *objw.Progs) {
 	}
 
 	x := EmitArgInfo(e.curfn, f.OwnAux.ABIInfo())
+	x.Set(obj.AttrContentAddressable, true)
 	e.curfn.LSym.Func().ArgInfo = x
 
 	// Emit a funcdata pointing at the arg info data.
@@ -6550,6 +6559,9 @@ func emitArgInfo(e *ssafn, f *ssa.Func, pp *objw.Progs) {
 // emit argument info (locations on stack) of f for traceback.
 func EmitArgInfo(f *ir.Func, abiInfo *abi.ABIParamResultInfo) *obj.LSym {
 	x := base.Ctxt.Lookup(fmt.Sprintf("%s.arginfo%d", f.LSym.Name, f.ABI))
+	// NOTE: do not set ContentAddressable here. This may be referenced from
+	// assembly code by name (in this case f is a declaration).
+	// Instead, set it in emitArgInfo above.
 
 	PtrSize := int64(types.PtrSize)
 	uintptrTyp := types.Types[types.TUINTPTR]
