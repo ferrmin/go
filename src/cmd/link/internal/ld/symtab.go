@@ -507,13 +507,9 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		symgcbits   = groupSym("runtime.gcbits.*", sym.SGCBITS)
 	)
 
-	var symgofuncrel loader.Sym
-	if !ctxt.DynlinkingGo() {
-		if ctxt.UseRelro() {
-			symgofuncrel = groupSym("go.funcrel.*", sym.SGOFUNCRELRO)
-		} else {
-			symgofuncrel = symgofunc
-		}
+	symgofuncrel := symgofunc
+	if ctxt.UseRelro() {
+		symgofuncrel = groupSym("go.funcrel.*", sym.SGOFUNCRELRO)
 	}
 
 	symt := ldr.CreateSymForUpdate("runtime.symtab", 0)
@@ -555,7 +551,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 			}
 			if ctxt.UseRelro() {
 				symGroupType[s] = sym.SGOFUNCRELRO
-				if symgofuncrel != 0 {
+				if !ctxt.DynlinkingGo() {
 					ldr.SetCarrierSym(s, symgofuncrel)
 				}
 			} else {
@@ -569,9 +565,11 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 			ldr.SymType(s) == sym.SGOFUNC && s != symgofunc, // inltree, see pcln.go
 			strings.HasSuffix(name, ".opendefer"),
 			strings.HasSuffix(name, ".arginfo0"),
-			strings.HasSuffix(name, ".arginfo1"):
-			symGroupType[s] = sym.SGOFUNC
+			strings.HasSuffix(name, ".arginfo1"),
+			strings.HasSuffix(name, ".args_stackmap"),
+			strings.HasSuffix(name, ".stkobj"):
 			ldr.SetAttrNotInSymbolTable(s, true)
+			symGroupType[s] = sym.SGOFUNC
 			ldr.SetCarrierSym(s, symgofunc)
 			if ctxt.Debugvlog != 0 {
 				align := ldr.SymAlign(s)
@@ -673,6 +671,8 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.gcbss", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.types", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.etypes", 0))
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.rodata", 0))
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("go.func.*", 0))
 
 	if ctxt.IsAIX() && ctxt.IsExternal() {
 		// Add R_XCOFFREF relocation to prevent ld's garbage collection of

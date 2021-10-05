@@ -427,6 +427,8 @@ type moduledata struct {
 	noptrbss, enoptrbss   uintptr
 	end, gcdata, gcbss    uintptr
 	types, etypes         uintptr
+	rodata                uintptr
+	gofunc                uintptr // go.func.*
 
 	textsectmap []textsect
 	typelinks   []int32 // offsets from types
@@ -1073,6 +1075,8 @@ func pcdatavalue2(f funcInfo, table uint32, targetpc uintptr) (int32, uintptr) {
 	return pcvalue(f, pcdatastart(f, table), targetpc, nil, true)
 }
 
+// funcdata returns a pointer to the ith funcdata for f.
+// funcdata should be kept in sync with cmd/link:writeFuncs.
 func funcdata(f funcInfo, i uint8) unsafe.Pointer {
 	if i < 0 || i >= f.nfuncdata {
 		return nil
@@ -1084,7 +1088,17 @@ func funcdata(f funcInfo, i uint8) unsafe.Pointer {
 		}
 		p = add(p, 4)
 	}
-	return *(*unsafe.Pointer)(add(p, uintptr(i)*goarch.PtrSize))
+	p = add(p, uintptr(i)*4)
+	off := *(*uint32)(p)
+	// Return off == ^uint32(0) ? 0 : f.datap.gofunc + uintptr(off), but without branches.
+	// The compiler calculates mask on most architectures using conditional assignment.
+	var mask uintptr
+	if off == ^uint32(0) {
+		mask = 1
+	}
+	mask--
+	raw := f.datap.gofunc + uintptr(off)
+	return unsafe.Pointer(raw & mask)
 }
 
 // step advances to the next pc, value pair in the encoded table.
