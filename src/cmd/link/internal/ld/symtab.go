@@ -406,22 +406,21 @@ func textsectionmap(ctxt *Link) (loader.Sym, uint32) {
 		if sect.Name != ".text" {
 			break
 		}
-		off = t.SetUint(ctxt.Arch, off, sect.Vaddr-textbase)
-		off = t.SetUint(ctxt.Arch, off, sect.Length)
-		if n == 0 {
-			s := ldr.Lookup("runtime.text", 0)
-			if s == 0 {
-				ctxt.Errorf(s, "Unable to find symbol runtime.text\n")
-			}
-			off = t.SetAddr(ctxt.Arch, off, s)
-
-		} else {
-			s := ldr.Lookup(fmt.Sprintf("runtime.text.%d", n), 0)
-			if s == 0 {
-				ctxt.Errorf(s, "Unable to find symbol runtime.text.%d\n", n)
-			}
-			off = t.SetAddr(ctxt.Arch, off, s)
+		// The fields written should match runtime/symtab.go:textsect.
+		// They are designed to minimize runtime calculations.
+		vaddr := sect.Vaddr - textbase
+		off = t.SetUint(ctxt.Arch, off, vaddr) // field vaddr
+		end := vaddr + sect.Length
+		off = t.SetUint(ctxt.Arch, off, end) // field end
+		name := "runtime.text"
+		if n != 0 {
+			name = fmt.Sprintf("runtime.text.%d", n)
 		}
+		s := ldr.Lookup(name, 0)
+		if s == 0 {
+			ctxt.Errorf(s, "Unable to find symbol %s\n", name)
+		}
+		off = t.SetAddr(ctxt.Arch, off, s) // field baseaddr
 		n++
 	}
 	return t.Sym(), uint32(n)
@@ -676,7 +675,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 
 	if ctxt.IsAIX() && ctxt.IsExternal() {
 		// Add R_XCOFFREF relocation to prevent ld's garbage collection of
-		// runtime.rodata, runtime.erodata and runtime.epclntab.
+		// the following symbols. They might not be referenced in the program.
 		addRef := func(name string) {
 			r, _ := moduledata.AddRel(objabi.R_XCOFFREF)
 			r.SetSym(ldr.Lookup(name, 0))
@@ -685,6 +684,12 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		addRef("runtime.rodata")
 		addRef("runtime.erodata")
 		addRef("runtime.epclntab")
+		// As we use relative addressing for text symbols in functab, it is
+		// important that the offsets we computed stay unchanged by the external
+		// linker, i.e. all symbols in Textp should not be removed.
+		// Most of them are actually referenced (our deadcode pass ensures that),
+		// except go.buildid which is generated late and not used by the program.
+		addRef("go.buildid")
 	}
 
 	// text section information

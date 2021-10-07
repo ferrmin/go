@@ -539,79 +539,23 @@ func numPCData(ldr *loader.Loader, s loader.Sym, fi loader.FuncInfo) uint32 {
 	return numPCData
 }
 
-// Helper types for iterating pclntab.
-type pclnSetAddr func(*loader.SymbolBuilder, *sys.Arch, int64, loader.Sym, int64) int64
-type pclnSetUint func(*loader.SymbolBuilder, *sys.Arch, int64, uint64) int64
-
 // generateFunctab creates the runtime.functab
 //
 // runtime.functab contains two things:
 //
 //   - pc->func look up table.
 //   - array of func objects, interleaved with pcdata and funcdata
-//
-// Because of timing in the linker, generating this table takes two passes.
-// The first pass is executed early in the link, and it creates any needed
-// relocations to lay out the data. The piece that needs relocations is
-// the PC->func table, handled in writePCToFunc.
-// After relocations, once we know where to write things in the output buffer,
-// we execute the second pass, which is actually writing the data.
 func (state *pclntab) generateFunctab(ctxt *Link, funcs []loader.Sym, inlSyms map[loader.Sym]loader.Sym, cuOffsets []uint32, nameOffsets map[loader.Sym]uint32) {
 	// Calculate the size of the table.
 	size, startLocations := state.calculateFunctabSize(ctxt, funcs)
-
-	// If we are internally linking a static executable, the function addresses
-	// are known, so we can just use them instead of emitting relocations. For
-	// other cases we still need to emit relocations.
-	//
-	// This boolean just helps us figure out which callback to use.
-	useSymValue := ctxt.IsExe() && ctxt.IsInternal()
-
 	writePcln := func(ctxt *Link, s loader.Sym) {
 		ldr := ctxt.loader
 		sb := ldr.MakeSymbolUpdater(s)
-
-		// Create our callbacks.
-		var setAddr pclnSetAddr
-		if useSymValue {
-			// We need to write the offset.
-			setAddr = func(s *loader.SymbolBuilder, arch *sys.Arch, off int64, tgt loader.Sym, add int64) int64 {
-				if v := ldr.SymValue(tgt); v != 0 {
-					s.SetUint(arch, off, uint64(v+add))
-				}
-				return 0
-			}
-		} else {
-			// We already wrote relocations.
-			setAddr = func(s *loader.SymbolBuilder, arch *sys.Arch, off int64, tgt loader.Sym, add int64) int64 { return 0 }
-		}
-
 		// Write the data.
-		writePCToFunc(ctxt, sb, funcs, startLocations, setAddr, (*loader.SymbolBuilder).SetUint)
+		writePCToFunc(ctxt, sb, funcs, startLocations)
 		writeFuncs(ctxt, sb, funcs, inlSyms, startLocations, cuOffsets, nameOffsets)
 	}
-
 	state.pclntab = state.addGeneratedSym(ctxt, "runtime.functab", size, writePcln)
-
-	// Create the relocations we need.
-	ldr := ctxt.loader
-	sb := ldr.MakeSymbolUpdater(state.pclntab)
-
-	var setAddr pclnSetAddr
-	if useSymValue {
-		// If we should use the symbol value, and we don't have one, write a relocation.
-		setAddr = func(sb *loader.SymbolBuilder, arch *sys.Arch, off int64, tgt loader.Sym, add int64) int64 {
-			if v := ldr.SymValue(tgt); v == 0 {
-				sb.SetAddrPlus(arch, off, tgt, add)
-			}
-			return 0
-		}
-	} else {
-		// If we're externally linking, write a relocation.
-		setAddr = (*loader.SymbolBuilder).SetAddrPlus
-	}
-	setUintNOP := func(*loader.SymbolBuilder, *sys.Arch, int64, uint64) int64 { return 0 }
-	writePCToFunc(ctxt, sb, funcs, startLocations, setAddr, setUintNOP)
 }
 
 // funcData returns the funcdata and offsets for the FuncInfo.
@@ -641,14 +585,13 @@ func (state pclntab) calculateFunctabSize(ctxt *Link, funcs []loader.Sym) (int64
 	ldr := ctxt.loader
 	startLocations := make([]uint32, len(funcs))
 
-	// Allocate space for the pc->func table. This structure consists of a pc
+	// Allocate space for the pc->func table. This structure consists of a pc offset
 	// and an offset to the func structure. After that, we have a single pc
 	// value that marks the end of the last function in the binary.
-	size := int64(int(state.nfunc)*2*ctxt.Arch.PtrSize + ctxt.Arch.PtrSize)
+	size := int64(int(state.nfunc)*2*4 + 4)
 
 	// Now find the space for the func objects. We do this in a running manner,
-	// so that we can find individual starting locations, and because funcdata
-	// requires alignment.
+	// so that we can find individual starting locations.
 	for i, s := range funcs {
 		size = Rnd(size, int64(ctxt.Arch.PtrSize))
 		startLocations[i] = uint32(size)
@@ -663,9 +606,6 @@ func (state pclntab) calculateFunctabSize(ctxt *Link, funcs []loader.Sym) (int64
 				}
 			}
 			size += int64(numPCData(ldr, s, fi) * 4)
-			if numFuncData > 0 { // Func data is aligned.
-				size = Rnd(size, int64(ctxt.Arch.PtrSize))
-			}
 			size += int64(numFuncData * 4)
 		}
 	}
@@ -674,10 +614,16 @@ func (state pclntab) calculateFunctabSize(ctxt *Link, funcs []loader.Sym) (int64
 }
 
 // writePCToFunc writes the PC->func lookup table.
-// This function walks the pc->func lookup table, executing callbacks
-// to generate relocations and writing the values for the table.
-func writePCToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, startLocations []uint32, setAddr pclnSetAddr, setUint pclnSetUint) {
+func writePCToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, startLocations []uint32) {
 	ldr := ctxt.loader
+	textStart := ldr.SymValue(ldr.Lookup("runtime.text", 0))
+	pcOff := func(s loader.Sym) uint32 {
+		off := ldr.SymValue(s) - textStart
+		if off < 0 {
+			panic(fmt.Sprintf("expected func %s(%x) to be placed at or after textStart (%x)", ldr.SymName(s), ldr.SymValue(s), textStart))
+		}
+		return uint32(off)
+	}
 	var prevFunc loader.Sym
 	prevSect := ldr.SymSect(funcs[0])
 	funcIndex := 0
@@ -686,24 +632,20 @@ func writePCToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, sta
 			// With multiple text sections, there may be a hole here in the
 			// address space. We use an invalid funcoff value to mark the hole.
 			// See also runtime/symtab.go:findfunc
-			prevFuncSize := int64(ldr.SymSize(prevFunc))
-			setAddr(sb, ctxt.Arch, int64(funcIndex*2*ctxt.Arch.PtrSize), prevFunc, prevFuncSize)
-			setUint(sb, ctxt.Arch, int64((funcIndex*2+1)*ctxt.Arch.PtrSize), ^uint64(0))
+			prevFuncSize := uint32(ldr.SymSize(prevFunc))
+			sb.SetUint32(ctxt.Arch, int64(funcIndex*2*4), pcOff(prevFunc)+prevFuncSize)
+			sb.SetUint32(ctxt.Arch, int64((funcIndex*2+1)*4), ^uint32(0))
 			funcIndex++
 			prevSect = thisSect
 		}
 		prevFunc = s
-		// TODO: We don't actually need these relocations, provided we go to a
-		// module->func look-up-table like we do for filenames. We could have a
-		// single relocation for the module, and have them all laid out as
-		// offsets from the beginning of that module.
-		setAddr(sb, ctxt.Arch, int64(funcIndex*2*ctxt.Arch.PtrSize), s, 0)
-		setUint(sb, ctxt.Arch, int64((funcIndex*2+1)*ctxt.Arch.PtrSize), uint64(startLocations[i]))
+		sb.SetUint32(ctxt.Arch, int64(funcIndex*2*4), pcOff(s))
+		sb.SetUint32(ctxt.Arch, int64((funcIndex*2+1)*4), startLocations[i])
 		funcIndex++
 	}
 
-	// Final entry of table is just end pc.
-	setAddr(sb, ctxt.Arch, int64(funcIndex)*2*int64(ctxt.Arch.PtrSize), prevFunc, ldr.SymSize(prevFunc))
+	// Final entry of table is just end pc offset.
+	sb.SetUint32(ctxt.Arch, int64(funcIndex)*2*4, pcOff(prevFunc)+uint32(ldr.SymSize(prevFunc)))
 }
 
 // writeFuncs writes the func structures and pcdata to runtime.functab.
@@ -725,20 +667,20 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 			pcsp, pcfile, pcline, pcinline, pcdata = ldr.PcdataAuxs(s, pcdata)
 		}
 
-		off := startLocations[i]
+		off := int64(startLocations[i])
 		// entry uintptr (offset of func entry PC from textStart)
 		entryOff := ldr.SymValue(s) - textStart
 		if entryOff < 0 {
 			panic(fmt.Sprintf("expected func %s(%x) to be placed before or at textStart (%x)", ldr.SymName(s), ldr.SymValue(s), textStart))
 		}
-		off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(entryOff)))
+		off = sb.SetUint32(ctxt.Arch, off, uint32(entryOff))
 
 		// name int32
 		nameoff, ok := nameOffsets[s]
 		if !ok {
 			panic("couldn't find function name offset")
 		}
-		off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(nameoff)))
+		off = sb.SetUint32(ctxt.Arch, off, uint32(nameoff))
 
 		// args int32
 		// TODO: Move into funcinfo.
@@ -746,77 +688,75 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 		if fi.Valid() {
 			args = uint32(fi.Args())
 		}
-		off = uint32(sb.SetUint32(ctxt.Arch, int64(off), args))
+		off = sb.SetUint32(ctxt.Arch, off, args)
 
 		// deferreturn
 		deferreturn := computeDeferReturn(ctxt, deferReturnSym, s)
-		off = uint32(sb.SetUint32(ctxt.Arch, int64(off), deferreturn))
+		off = sb.SetUint32(ctxt.Arch, off, deferreturn)
 
 		// pcdata
 		if fi.Valid() {
-			off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(ldr.SymValue(pcsp))))
-			off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(ldr.SymValue(pcfile))))
-			off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(ldr.SymValue(pcline))))
+			off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcsp)))
+			off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcfile)))
+			off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcline)))
 		} else {
 			off += 12
 		}
-		off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(numPCData(ldr, s, fi))))
+		off = sb.SetUint32(ctxt.Arch, off, uint32(numPCData(ldr, s, fi)))
 
 		// Store the offset to compilation unit's file table.
 		cuIdx := ^uint32(0)
 		if cu := ldr.SymUnit(s); cu != nil {
 			cuIdx = cuOffsets[cu.PclnIndex]
 		}
-		off = uint32(sb.SetUint32(ctxt.Arch, int64(off), cuIdx))
+		off = sb.SetUint32(ctxt.Arch, off, cuIdx)
 
 		// funcID uint8
 		var funcID objabi.FuncID
 		if fi.Valid() {
 			funcID = fi.FuncID()
 		}
-		off = uint32(sb.SetUint8(ctxt.Arch, int64(off), uint8(funcID)))
+		off = sb.SetUint8(ctxt.Arch, off, uint8(funcID))
 
 		// flag uint8
 		var flag objabi.FuncFlag
 		if fi.Valid() {
 			flag = fi.FuncFlag()
 		}
-		off = uint32(sb.SetUint8(ctxt.Arch, int64(off), uint8(flag)))
+		off = sb.SetUint8(ctxt.Arch, off, uint8(flag))
 
 		off += 1 // pad
 
 		// nfuncdata must be the final entry.
 		funcdata = funcData(ldr, s, fi, 0, funcdata)
-		off = uint32(sb.SetUint8(ctxt.Arch, int64(off), uint8(len(funcdata))))
+		off = sb.SetUint8(ctxt.Arch, off, uint8(len(funcdata)))
 
 		// Output the pcdata.
 		if fi.Valid() {
 			for j, pcSym := range pcdata {
-				sb.SetUint32(ctxt.Arch, int64(off+uint32(j*4)), uint32(ldr.SymValue(pcSym)))
+				sb.SetUint32(ctxt.Arch, off+int64(j*4), uint32(ldr.SymValue(pcSym)))
 			}
 			if fi.NumInlTree() > 0 {
-				sb.SetUint32(ctxt.Arch, int64(off+objabi.PCDATA_InlTreeIndex*4), uint32(ldr.SymValue(pcinline)))
+				sb.SetUint32(ctxt.Arch, off+objabi.PCDATA_InlTreeIndex*4, uint32(ldr.SymValue(pcinline)))
 			}
 		}
 
 		// Write funcdata refs as offsets from go.func.* and go.funcrel.*.
 		funcdata = funcData(ldr, s, fi, inlSyms[s], funcdata)
-		// funcdata must be pointer-aligned and we're only int32-aligned.
 		// Missing funcdata will be ^0. See runtime/symtab.go:funcdata.
-		off = uint32(startLocations[i] + funcSize + numPCData(ldr, s, fi)*4)
-		off = uint32(Rnd(int64(off), int64(ctxt.Arch.PtrSize)))
+		off = int64(startLocations[i] + funcSize + numPCData(ldr, s, fi)*4)
 		for j := range funcdata {
-			dataoff := off + uint32(4*j)
+			dataoff := off + int64(4*j)
 			fdsym := funcdata[j]
 			if fdsym == 0 {
-				sb.SetUint32(ctxt.Arch, int64(dataoff), ^uint32(0)) // ^0 is a sentinel for "no value"
+				sb.SetUint32(ctxt.Arch, dataoff, ^uint32(0)) // ^0 is a sentinel for "no value"
 				continue
 			}
 
 			if outer := ldr.OuterSym(fdsym); outer != gofunc {
 				panic(fmt.Sprintf("bad carrier sym for symbol %s (funcdata %s#%d), want go.func.* got %s", ldr.SymName(fdsym), ldr.SymName(s), j, ldr.SymName(outer)))
 			}
-			sb.SetUint32(ctxt.Arch, int64(dataoff), uint32(ldr.SymValue(fdsym)-gofuncBase))
+			sb.SetUint32(ctxt.Arch, dataoff, uint32(ldr.SymValue(fdsym)-gofuncBase))
 		}
 	}
 }
