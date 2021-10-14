@@ -1,13 +1,11 @@
-// Copyright 2011 The Go Authors. All rights reserved.
+// Copyright 2021 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-
-//go:build dragonfly || netbsd || (openbsd && mips64)
-// +build dragonfly netbsd openbsd,mips64
 
 package syscall
 
 import (
+	"runtime"
 	"unsafe"
 )
 
@@ -32,8 +30,15 @@ type SysProcAttr struct {
 	// Unlike Setctty, in this case Ctty must be a descriptor
 	// number in the parent process.
 	Foreground bool
-	Pgid       int // Child's process group ID if Setpgid.
+	Pgid       int    // Child's process group ID if Setpgid.
+	Pdeathsig  Signal // Signal that the process will get when its parent dies (Linux and FreeBSD only)
 }
+
+const (
+	_P_PID = 0
+
+	_PROC_PDEATHSIG_CTL = 11
+)
 
 // Implemented in runtime package.
 func runtime_BeforeFork()
@@ -59,6 +64,9 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		nextfd int
 		i      int
 	)
+
+	// Record parent PID so child can test if it has died.
+	ppid, _, _ := RawSyscall(SYS_GETPID, 0, 0, 0)
 
 	// guard against side effects of shuffling fds below.
 	// Make sure that nextfd is beyond any currently open files so
@@ -178,14 +186,38 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		}
 	}
 
-	// Pass 1: look for fd[i] < i and move those up above len(fd)
-	// so that pass 2 won't stomp on an fd it needs later.
-	if pipe < nextfd {
-		_, _, err1 = RawSyscall(SYS_DUP2, uintptr(pipe), uintptr(nextfd), 0)
+	// Parent death signal
+	if sys.Pdeathsig != 0 {
+		switch runtime.GOARCH {
+		case "386", "arm":
+			_, _, err1 = RawSyscall6(SYS_PROCCTL, _P_PID, 0, 0, _PROC_PDEATHSIG_CTL, uintptr(unsafe.Pointer(&sys.Pdeathsig)), 0)
+		default:
+			_, _, err1 = RawSyscall6(SYS_PROCCTL, _P_PID, 0, _PROC_PDEATHSIG_CTL, uintptr(unsafe.Pointer(&sys.Pdeathsig)), 0, 0)
+		}
 		if err1 != 0 {
 			goto childerror
 		}
-		RawSyscall(SYS_FCNTL, uintptr(nextfd), F_SETFD, FD_CLOEXEC)
+
+		// Signal self if parent is already dead. This might cause a
+		// duplicate signal in rare cases, but it won't matter when
+		// using SIGKILL.
+		r1, _, _ = RawSyscall(SYS_GETPPID, 0, 0, 0)
+		if r1 != ppid {
+			pid, _, _ := RawSyscall(SYS_GETPID, 0, 0, 0)
+			_, _, err1 := RawSyscall(SYS_KILL, pid, uintptr(sys.Pdeathsig), 0)
+			if err1 != 0 {
+				goto childerror
+			}
+		}
+	}
+
+	// Pass 1: look for fd[i] < i and move those up above len(fd)
+	// so that pass 2 won't stomp on an fd it needs later.
+	if pipe < nextfd {
+		_, _, err1 = RawSyscall(SYS_FCNTL, uintptr(pipe), F_DUP2FD_CLOEXEC, uintptr(nextfd))
+		if err1 != 0 {
+			goto childerror
+		}
 		pipe = nextfd
 		nextfd++
 	}
@@ -194,11 +226,10 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 			if nextfd == pipe { // don't stomp on pipe
 				nextfd++
 			}
-			_, _, err1 = RawSyscall(SYS_DUP2, uintptr(fd[i]), uintptr(nextfd), 0)
+			_, _, err1 = RawSyscall(SYS_FCNTL, uintptr(fd[i]), F_DUP2FD_CLOEXEC, uintptr(nextfd))
 			if err1 != 0 {
 				goto childerror
 			}
-			RawSyscall(SYS_FCNTL, uintptr(nextfd), F_SETFD, FD_CLOEXEC)
 			fd[i] = nextfd
 			nextfd++
 		}
