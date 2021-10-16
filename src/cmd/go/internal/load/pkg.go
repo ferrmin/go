@@ -2205,6 +2205,11 @@ func (p *Package) collectDeps() {
 // Note that the GoVersion field is not set here to avoid encoding it twice.
 // It is stored separately in the binary, mostly for historical reasons.
 func (p *Package) setBuildInfo() {
+	// TODO: build and vcs information is not embedded for executables in GOROOT.
+	// cmd/dist uses -gcflags=all= -ldflags=all= by default, which means these
+	// executables always appear stale unless the user sets the same flags.
+	// Perhaps it's safe to omit those flags when GO_GCFLAGS and GO_LDFLAGS
+	// are not set?
 	setPkgErrorf := func(format string, args ...interface{}) {
 		if p.Error == nil {
 			p.Error = &PackageError{Err: fmt.Errorf(format, args...)}
@@ -2274,7 +2279,7 @@ func (p *Package) setBuildInfo() {
 
 	// Add command-line flags relevant to the build.
 	// This is informational, not an exhaustive list.
-	if cfg.BuildBuildinfo {
+	if cfg.BuildBuildinfo && !p.Standard {
 		appendSetting("compiler", cfg.BuildContext.Compiler)
 		if BuildAsmflags.present {
 			appendSetting("asmflags", BuildAsmflags.String())
@@ -2313,8 +2318,9 @@ func (p *Package) setBuildInfo() {
 	var repoDir string
 	var vcsCmd *vcs.Cmd
 	var err error
-	if cfg.BuildBuildvcs && p.Module != nil && p.Module.Version == "" {
-		repoDir, vcsCmd, err = vcs.FromDir(base.Cwd(), "")
+	const allowNesting = true
+	if cfg.BuildBuildvcs && p.Module != nil && p.Module.Version == "" && !p.Standard {
+		repoDir, vcsCmd, err = vcs.FromDir(base.Cwd(), "", allowNesting)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			setVCSError(err)
 			return
@@ -2333,7 +2339,7 @@ func (p *Package) setBuildInfo() {
 		// repository. vcs.FromDir allows nested Git repositories, but nesting
 		// is not allowed for other VCS tools. The current directory may be outside
 		// p.Module.Dir when a workspace is used.
-		pkgRepoDir, _, err := vcs.FromDir(p.Dir, "")
+		pkgRepoDir, _, err := vcs.FromDir(p.Dir, "", allowNesting)
 		if err != nil {
 			setVCSError(err)
 			return
@@ -2342,7 +2348,7 @@ func (p *Package) setBuildInfo() {
 			setVCSError(fmt.Errorf("main package is in repository %q but current directory is in repository %q", pkgRepoDir, repoDir))
 			return
 		}
-		modRepoDir, _, err := vcs.FromDir(p.Module.Dir, "")
+		modRepoDir, _, err := vcs.FromDir(p.Module.Dir, "", allowNesting)
 		if err != nil {
 			setVCSError(err)
 			return

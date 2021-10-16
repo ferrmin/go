@@ -348,8 +348,8 @@ func TestMapIterSet(t *testing.T) {
 
 	iter := v.MapRange()
 	for iter.Next() {
-		iter.SetKey(k)
-		iter.SetValue(e)
+		k.SetIterKey(iter)
+		e.SetIterValue(iter)
 		want := m[k.String()]
 		got := e.Interface()
 		if got != want {
@@ -366,8 +366,8 @@ func TestMapIterSet(t *testing.T) {
 	got := int(testing.AllocsPerRun(10, func() {
 		iter := v.MapRange()
 		for iter.Next() {
-			iter.SetKey(k)
-			iter.SetValue(e)
+			k.SetIterKey(iter)
+			e.SetIterValue(iter)
 		}
 	}))
 	// Making a *MapIter allocates. This should be the only allocation.
@@ -7475,9 +7475,9 @@ func TestMapIterReset(t *testing.T) {
 		var seenk, seenv uint64
 		iter.Reset(ValueOf(m3))
 		for iter.Next() {
-			iter.SetKey(kv)
+			kv.SetIterKey(iter)
 			seenk ^= kv.Uint()
-			iter.SetValue(kv)
+			kv.SetIterValue(iter)
 			seenv ^= kv.Uint()
 		}
 		if seenk != 0b111 {
@@ -7618,4 +7618,102 @@ func TestConvertibleTo(t *testing.T) {
 	if t3.ConvertibleTo(t4) {
 		t.Fatalf("(%s).ConvertibleTo(%s) = true, want false", t3, t4)
 	}
+}
+
+func TestSetIter(t *testing.T) {
+	data := map[string]int{
+		"foo": 1,
+		"bar": 2,
+		"baz": 3,
+	}
+
+	m := ValueOf(data)
+	i := m.MapRange()
+	k := New(TypeOf("")).Elem()
+	v := New(TypeOf(0)).Elem()
+	shouldPanic("Value.SetIterKey called before Next", func() {
+		k.SetIterKey(i)
+	})
+	shouldPanic("Value.SetIterValue called before Next", func() {
+		v.SetIterValue(i)
+	})
+	data2 := map[string]int{}
+	for i.Next() {
+		k.SetIterKey(i)
+		v.SetIterValue(i)
+		data2[k.Interface().(string)] = v.Interface().(int)
+	}
+	if !DeepEqual(data, data2) {
+		t.Errorf("maps not equal, got %v want %v", data2, data)
+	}
+	shouldPanic("Value.SetIterKey called on exhausted iterator", func() {
+		k.SetIterKey(i)
+	})
+	shouldPanic("Value.SetIterValue called on exhausted iterator", func() {
+		v.SetIterValue(i)
+	})
+
+	i.Reset(m)
+	i.Next()
+	shouldPanic("Value.SetIterKey using unaddressable value", func() {
+		ValueOf("").SetIterKey(i)
+	})
+	shouldPanic("Value.SetIterValue using unaddressable value", func() {
+		ValueOf(0).SetIterValue(i)
+	})
+	shouldPanic("value of type string is not assignable to type int", func() {
+		New(TypeOf(0)).Elem().SetIterKey(i)
+	})
+	shouldPanic("value of type int is not assignable to type string", func() {
+		New(TypeOf("")).Elem().SetIterValue(i)
+	})
+
+	// Make sure assignment conversion works.
+	var x interface{}
+	y := ValueOf(&x).Elem()
+	y.SetIterKey(i)
+	if _, ok := data[x.(string)]; !ok {
+		t.Errorf("got key %s which is not in map", x)
+	}
+	y.SetIterValue(i)
+	if x.(int) < 1 || x.(int) > 3 {
+		t.Errorf("got value %d which is not in map", x)
+	}
+
+	// Try some key/value types which are direct interfaces.
+	a := 88
+	b := 99
+	pp := map[*int]*int{
+		&a: &b,
+	}
+	i = ValueOf(pp).MapRange()
+	i.Next()
+	y.SetIterKey(i)
+	if got := *y.Interface().(*int); got != a {
+		t.Errorf("pointer incorrect: got %d want %d", got, a)
+	}
+	y.SetIterValue(i)
+	if got := *y.Interface().(*int); got != b {
+		t.Errorf("pointer incorrect: got %d want %d", got, b)
+	}
+}
+
+//go:notinheap
+type nih struct{ x int }
+
+var global_nih = nih{x: 7}
+
+func TestNotInHeapDeref(t *testing.T) {
+	// See issue 48399.
+	v := ValueOf((*nih)(nil))
+	v.Elem()
+	shouldPanic("reflect: call of reflect.Value.Field on zero Value", func() { v.Elem().Field(0) })
+
+	v = ValueOf(&global_nih)
+	if got := v.Elem().Field(0).Int(); got != 7 {
+		t.Fatalf("got %d, want 7", got)
+	}
+
+	v = ValueOf((*nih)(unsafe.Pointer(new(int))))
+	shouldPanic("reflect: reflect.Value.Elem on an invalid notinheap pointer", func() { v.Elem() })
 }
