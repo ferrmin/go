@@ -185,7 +185,7 @@ func (g *genInst) scanForGenCalls(decl ir.Node) {
 			// it before installing the instantiation, so we are
 			// checking against non-shape param types in
 			// typecheckaste.
-			transformCall(call, nil)
+			transformCall(call)
 
 			// Replace the OFUNCINST with a direct reference to the
 			// new stenciled function
@@ -223,7 +223,7 @@ func (g *genInst) scanForGenCalls(decl ir.Node) {
 
 			// Transform the Call now, which changes OCALL
 			// to OCALLFUNC and does typecheckaste/assignconvfn.
-			transformCall(call, nil)
+			transformCall(call)
 
 			st := g.getInstantiation(gf, targs, true).fun
 			dictValue, usingSubdict := g.getDictOrSubdict(declInfo, n, gf, targs, true)
@@ -881,7 +881,7 @@ func (subst *subster) checkDictionary(name *ir.Name, targs []*types.Type) (code 
 		cond := ir.NewBinaryExpr(pos, ir.ONE, want, got)
 		typed(types.Types[types.TBOOL], cond)
 		panicArg := ir.NewNilExpr(pos)
-		typed(types.NewInterface(types.LocalPkg, nil), panicArg)
+		typed(types.NewInterface(types.LocalPkg, nil, false), panicArg)
 		then := ir.NewUnaryExpr(pos, ir.OPANIC, panicArg)
 		then.SetTypecheck(1)
 		x := ir.NewIfStmt(pos, cond, []ir.Node{then}, nil)
@@ -1089,14 +1089,14 @@ func (subst *subster) node(n ir.Node) ir.Node {
 				// transform the call.
 				call.X.(*ir.SelectorExpr).SetOp(ir.OXDOT)
 				transformDot(call.X.(*ir.SelectorExpr), true)
-				transformCall(call, subst.info.dictParam)
+				transformCall(call)
 
 			case ir.ODOT, ir.ODOTPTR:
 				// An OXDOT for a generic receiver was resolved to
 				// an access to a field which has a function
 				// value. Transform the call to that function, now
 				// that the OXDOT was resolved.
-				transformCall(call, subst.info.dictParam)
+				transformCall(call)
 
 			case ir.ONAME:
 				name := call.X.Name()
@@ -1113,24 +1113,24 @@ func (subst *subster) node(n ir.Node) ir.Node {
 					// This is the case of a function value that was a
 					// type parameter (implied to be a function via a
 					// structural constraint) which is now resolved.
-					transformCall(call, subst.info.dictParam)
+					transformCall(call)
 				}
 
 			case ir.OCLOSURE:
-				transformCall(call, subst.info.dictParam)
+				transformCall(call)
 
 			case ir.ODEREF, ir.OINDEX, ir.OINDEXMAP, ir.ORECV:
 				// Transform a call that was delayed because of the
 				// use of typeparam inside an expression that required
 				// a pointer dereference, array indexing, map indexing,
 				// or channel receive to compute function value.
-				transformCall(call, subst.info.dictParam)
+				transformCall(call)
 
 			case ir.OCALL, ir.OCALLFUNC, ir.OCALLMETH, ir.OCALLINTER:
-				transformCall(call, subst.info.dictParam)
+				transformCall(call)
 
 			case ir.OCONVNOP:
-				transformCall(call, subst.info.dictParam)
+				transformCall(call)
 
 			case ir.OFUNCINST:
 				// A call with an OFUNCINST will get transformed
@@ -1276,7 +1276,7 @@ func (g *genInst) dictPass(info *instInfo) {
 					m.(*ir.CallExpr).X.(*ir.SelectorExpr).SetOp(ir.OXDOT)
 					transformDot(m.(*ir.CallExpr).X.(*ir.SelectorExpr), true)
 				}
-				transformCall(m.(*ir.CallExpr), info.dictParam)
+				transformCall(m.(*ir.CallExpr))
 			}
 
 		case ir.OCONVIFACE:
@@ -1523,18 +1523,12 @@ func deref(t *types.Type) *types.Type {
 // needed methods.
 func markTypeUsed(t *types.Type, lsym *obj.LSym) {
 	if t.IsInterface() {
-		// Mark all the methods of the interface as used.
-		// TODO: we should really only mark the interface methods
-		// that are actually called in the application.
-		for i, _ := range t.AllMethods().Slice() {
-			reflectdata.MarkUsedIfaceMethodIndex(lsym, t, i)
-		}
-	} else {
-		// TODO: This is somewhat overkill, we really only need it
-		// for types that are put into interfaces.
-		// Note: this relocation is also used in cmd/link/internal/ld/dwarf.go
-		reflectdata.MarkTypeUsedInInterface(t, lsym)
+		return
 	}
+	// TODO: This is somewhat overkill, we really only need it
+	// for types that are put into interfaces.
+	// Note: this relocation is also used in cmd/link/internal/ld/dwarf.go
+	reflectdata.MarkTypeUsedInInterface(t, lsym)
 }
 
 // getDictionarySym returns the dictionary for the named generic function gf, which
@@ -1735,18 +1729,6 @@ func (g *genInst) finalizeSyms() {
 				se := n.(*ir.SelectorExpr)
 				srctype = subst.Typ(se.X.Type())
 				dsttype = subst.Typ(info.shapeToBound[se.X.Type()])
-				found := false
-				for i, m := range dsttype.AllMethods().Slice() {
-					if se.Sel == m.Sym {
-						// Mark that this method se.Sel is
-						// used for the dsttype interface, so
-						// it won't get deadcoded.
-						reflectdata.MarkUsedIfaceMethodIndex(lsym, dsttype, i)
-						found = true
-						break
-					}
-				}
-				assert(found)
 			case ir.ODOTTYPE, ir.ODOTTYPE2:
 				srctype = subst.Typ(n.(*ir.TypeAssertExpr).Type())
 				dsttype = subst.Typ(n.(*ir.TypeAssertExpr).X.Type())
