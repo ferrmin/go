@@ -187,29 +187,25 @@ func (check *Checker) unary(x *operand, e *syntax.Operation) {
 		return
 
 	case syntax.Recv:
-		var elem Type
-		if !underIs(x.typ, func(u Type) bool {
-			ch, _ := u.(*Chan)
-			if ch == nil {
-				check.errorf(x, invalidOp+"cannot receive from non-channel %s", x)
-				return false
-			}
-			if ch.dir == SendOnly {
-				check.errorf(x, invalidOp+"cannot receive from send-only channel %s", x)
-				return false
-			}
-			if elem != nil && !Identical(ch.elem, elem) {
-				check.errorf(x, invalidOp+"channels of %s must have the same element type", x)
-				return false
-			}
-			elem = ch.elem
-			return true
-		}) {
+		u := structuralType(x.typ)
+		if u == nil {
+			check.errorf(x, invalidOp+"cannot receive from %s: no structural type", x)
+			x.mode = invalid
+			return
+		}
+		ch, _ := u.(*Chan)
+		if ch == nil {
+			check.errorf(x, invalidOp+"cannot receive from non-channel %s", x)
+			x.mode = invalid
+			return
+		}
+		if ch.dir == SendOnly {
+			check.errorf(x, invalidOp+"cannot receive from send-only channel %s", x)
 			x.mode = invalid
 			return
 		}
 		x.mode = commaok
-		x.typ = elem
+		x.typ = ch.elem
 		check.hasCallOrRecv = true
 		return
 	}
@@ -1258,7 +1254,7 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 			goto Error
 		}
 
-		switch utyp := structure(base).(type) {
+		switch utyp := structuralType(base).(type) {
 		case *Struct:
 			// Prevent crash if the struct referred to is not yet set up.
 			// See analogous comment for *Array.
