@@ -29,6 +29,24 @@ Do not send CLs removing the interior tags from such phrases.
   TODO: complete this section
 </p>
 
+<h3 id="generics">Generics</h3>
+
+<p>
+Go 1.18 includes an implementation of generics as described
+by <a href="https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md">the
+proposal</a>.
+</p>
+
+<p>
+  The current generics implementation has the following limitations:
+  <ul>
+    <li><!-- issue 47631 -->
+      The Go compiler cannot currently handle type declarations inside generic functions
+      or methods. We hope to provide support for this feature in Go 1.19.
+    </li>
+  </ul>
+</p>
+
 <h2 id="ports">Ports</h2>
 
 <h3 id="freebsd">FreeBSD</h3>
@@ -441,7 +459,8 @@ Do not send CLs removing the interior tags from such phrases.
 <dl id="unicode/utf8"><dt><a href="/pkg/unicode/utf8/">unicode/utf8</a></dt>
   <dd>
     <p><!-- CL 345571 -->
-      TODO: <a href="https://golang.org/cl/345571">https://golang.org/cl/345571</a>: add AppendRune
+      The <a href="/pkg/unicode/utf8/#AppendRune"><code>AppendRune</code></a> function appends the UTF-8 new
+      encoding of a <code>rune</code> to a <code>[]byte</code>.
     </p>
   </dd>
 </dl><!-- unicode/utf8 -->

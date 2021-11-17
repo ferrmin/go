@@ -5,6 +5,7 @@ package types2
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -16,58 +17,91 @@ import (
 // It is safe for concurrent use.
 type Context struct {
 	mu      sync.Mutex
-	typeMap map[string]*Named // type hash -> instance
-	nextID  int               // next unique ID
-	seen    map[*Named]int    // assigned unique IDs
+	typeMap map[string][]ctxtEntry // type hash -> instances entries
+	nextID  int                    // next unique ID
+	seen    map[*Named]int         // assigned unique IDs
+}
+
+type ctxtEntry struct {
+	orig     Type
+	targs    []Type
+	instance Type // = orig[targs]
 }
 
 // NewContext creates a new Context.
 func NewContext() *Context {
 	return &Context{
-		typeMap: make(map[string]*Named),
+		typeMap: make(map[string][]ctxtEntry),
 		seen:    make(map[*Named]int),
 	}
 }
 
-// typeHash returns a string representation of typ, which can be used as an exact
-// type hash: types that are identical produce identical string representations.
-// If typ is a *Named type and targs is not empty, typ is printed as if it were
-// instantiated with targs. The result is guaranteed to not contain blanks (" ").
+// typeHash returns a string representation of typ instantiated with targs,
+// which can be used as an exact type hash: types that are identical produce
+// identical string representations. If targs is not empty, typ is printed as
+// if it were instantiated with targs. The result is guaranteed to not contain
+// blanks (" ").
 func (ctxt *Context) typeHash(typ Type, targs []Type) string {
 	assert(ctxt != nil)
 	assert(typ != nil)
 	var buf bytes.Buffer
 
 	h := newTypeHasher(&buf, ctxt)
-	// Caution: don't use asNamed here. TypeHash may be called for unexpanded
-	// types. We don't need anything other than name and type arguments below,
-	// which do not require expansion.
-	if named, _ := typ.(*Named); named != nil && len(targs) > 0 {
-		// Don't use WriteType because we need to use the provided targs
-		// and not any targs that might already be with the *Named type.
-		h.typePrefix(named)
-		h.typeName(named.obj)
+	h.typ(typ)
+	if len(targs) > 0 {
+		// TODO(rfindley): consider asserting on isGeneric(typ) here, if and when
+		// isGeneric handles *Signature types.
 		h.typeList(targs)
-	} else {
-		assert(targs == nil)
-		h.typ(typ)
 	}
 
 	return strings.Replace(buf.String(), " ", "#", -1) // ReplaceAll is not available in Go1.4
 }
 
-// typeForHash returns the recorded type for the type hash h, if it exists.
-// If no type exists for h and n is non-nil, n is recorded for h.
-func (ctxt *Context) typeForHash(h string, n *Named) *Named {
+// lookup returns an existing instantiation of orig with targs, if it exists.
+// Otherwise, it returns nil.
+func (ctxt *Context) lookup(h string, orig Type, targs []Type) Type {
 	ctxt.mu.Lock()
 	defer ctxt.mu.Unlock()
-	if existing := ctxt.typeMap[h]; existing != nil {
-		return existing
+
+	for _, e := range ctxt.typeMap[h] {
+		if identicalInstance(orig, targs, e.orig, e.targs) {
+			return e.instance
+		}
+		if debug {
+			// Panic during development to surface any imperfections in our hash.
+			panic(fmt.Sprintf("non-identical instances: (orig: %s, targs: %v) and %s", orig, targs, e.instance))
+		}
 	}
-	if n != nil {
-		ctxt.typeMap[h] = n
+
+	return nil
+}
+
+// update de-duplicates n against previously seen types with the hash h.  If an
+// identical type is found with the type hash h, the previously seen type is
+// returned. Otherwise, n is returned, and recorded in the Context for the hash
+// h.
+func (ctxt *Context) update(h string, orig Type, targs []Type, inst Type) Type {
+	assert(inst != nil)
+	ctxt.mu.Lock()
+	defer ctxt.mu.Unlock()
+
+	for _, e := range ctxt.typeMap[h] {
+		if inst == nil || Identical(inst, e.instance) {
+			return e.instance
+		}
+		if debug {
+			// Panic during development to surface any imperfections in our hash.
+			panic(fmt.Sprintf("%s and %s are not identical", inst, e.instance))
+		}
 	}
-	return n
+
+	ctxt.typeMap[h] = append(ctxt.typeMap[h], ctxtEntry{
+		orig:     orig,
+		targs:    targs,
+		instance: inst,
+	})
+
+	return inst
 }
 
 // idForType returns a unique ID for the pointer n.

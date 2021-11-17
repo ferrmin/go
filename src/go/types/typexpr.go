@@ -337,7 +337,7 @@ func (check *Checker) typInternal(e0 ast.Expr, def *Named) (T Type) {
 		check.later(func() {
 			if !Comparable(typ.key) {
 				var why string
-				if asTypeParam(typ.key) != nil {
+				if isTypeParam(typ.key) {
 					why = " (missing comparable constraint)"
 				}
 				check.errorf(e.Key, _IncomparableMapKey, "incomparable map key type %s%s", typ.key, why)
@@ -449,7 +449,7 @@ func (check *Checker) instantiatedType(ix *typeparams.IndexExpr, def *Named) (re
 		return expandNamed(ctxt, n, pos)
 	}
 
-	// origin.tparams may not be set up, so we need to do expansion later.
+	// orig.tparams may not be set up, so we need to do expansion later.
 	check.later(func() {
 		// This is an instance from the source, not from recursive substitution,
 		// and so it must be resolved during type-checking so that we can report

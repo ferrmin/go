@@ -175,7 +175,7 @@ func (check *Checker) callExpr(x *operand, call *ast.CallExpr) exprKind {
 	cgocall := x.mode == cgofunc
 
 	// a type parameter may be "called" if all types have the same signature
-	sig, _ := structure(x.typ).(*Signature)
+	sig, _ := structuralType(x.typ).(*Signature)
 	if sig == nil {
 		check.invalidOp(x, _InvalidCall, "cannot call non-function %s", x)
 		x.mode = invalid
@@ -531,7 +531,7 @@ func (check *Checker) selector(x *operand, e *ast.SelectorExpr) {
 			check.errorf(e.Sel, _InvalidMethodExpr, "cannot call pointer method %s on %s", sel, x.typ)
 		default:
 			var why string
-			if tpar := asTypeParam(x.typ); tpar != nil {
+			if tpar, _ := x.typ.(*TypeParam); tpar != nil {
 				// Type parameter bounds don't specify fields, so don't mention "field".
 				if tname := tpar.iface().obj; tname != nil {
 					why = check.sprintf("interface %s has no method %s", tname.name, sel)

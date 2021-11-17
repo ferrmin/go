@@ -147,11 +147,10 @@ var op2str2 = [...]string{
 // If typ is a type parameter, underIs returns the result of typ.underIs(f).
 // Otherwise, underIs returns the result of f(under(typ)).
 func underIs(typ Type, f func(Type) bool) bool {
-	u := under(typ)
-	if tpar, _ := u.(*TypeParam); tpar != nil {
+	if tpar, _ := typ.(*TypeParam); tpar != nil {
 		return tpar.underIs(f)
 	}
-	return f(u)
+	return f(under(typ))
 }
 
 // The unary expression e may be nil. It's passed in for better error messages only.
@@ -174,29 +173,26 @@ func (check *Checker) unary(x *operand, e *ast.UnaryExpr) {
 		return
 
 	case token.ARROW:
-		var elem Type
-		if !underIs(x.typ, func(u Type) bool {
-			ch, _ := u.(*Chan)
-			if ch == nil {
-				check.invalidOp(x, _InvalidReceive, "cannot receive from non-channel %s", x)
-				return false
-			}
-			if ch.dir == SendOnly {
-				check.invalidOp(x, _InvalidReceive, "cannot receive from send-only channel %s", x)
-				return false
-			}
-			if elem != nil && !Identical(ch.elem, elem) {
-				check.invalidOp(x, _InvalidReceive, "channels of %s must have the same element type", x)
-				return false
-			}
-			elem = ch.elem
-			return true
-		}) {
+		u := structuralType(x.typ)
+		if u == nil {
+			check.invalidOp(x, _InvalidReceive, "cannot receive from %s: no structural type", x)
 			x.mode = invalid
 			return
 		}
+		ch, _ := u.(*Chan)
+		if ch == nil {
+			check.invalidOp(x, _InvalidReceive, "cannot receive from non-channel %s", x)
+			x.mode = invalid
+			return
+		}
+		if ch.dir == SendOnly {
+			check.invalidOp(x, _InvalidReceive, "cannot receive from send-only channel %s", x)
+			x.mode = invalid
+			return
+		}
+
 		x.mode = commaok
-		x.typ = elem
+		x.typ = ch.elem
 		check.hasCallOrRecv = true
 		return
 	}
@@ -1228,7 +1224,7 @@ func (check *Checker) exprInternal(x *operand, e ast.Expr, hint Type) exprKind {
 			goto Error
 		}
 
-		switch utyp := structure(base).(type) {
+		switch utyp := structuralType(base).(type) {
 		case *Struct:
 			// Prevent crash if the struct referred to is not yet set up.
 			// See analogous comment for *Array.
