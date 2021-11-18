@@ -6,6 +6,11 @@
 
 package types
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Internal use of LookupFieldOrMethod: If the obj result is a method
 // associated with a concrete (non-interface) type, the method's signature
 // may not be fully set up. Call Checker.objDecl(obj, nil) before accessing
@@ -64,6 +69,8 @@ func LookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 //           indirectly via different packages.)
 
 // lookupFieldOrMethod should only be called by LookupFieldOrMethod and missingMethod.
+//
+// The resulting object may not be fully type-checked.
 func lookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (obj Object, index []int, indirect bool) {
 	// WARNING: The code in this function is extremely subtle - do not modify casually!
 
@@ -341,7 +348,12 @@ func (check *Checker) missingMethod(V Type, T *Interface, static bool) (method, 
 		if obj == nil {
 			ptr := NewPointer(V)
 			obj, _, _ = lookupFieldOrMethod(ptr, false, m.pkg, m.name)
+
 			if obj != nil {
+				// methods may not have a fully set up signature yet
+				if check != nil {
+					check.objDecl(obj, nil)
+				}
 				return m, obj.(*Func)
 			}
 		}
@@ -380,6 +392,59 @@ func (check *Checker) missingMethod(V Type, T *Interface, static bool) (method, 
 	}
 
 	return
+}
+
+// missingMethodReason returns a string giving the detailed reason for a missing method m,
+// where m is missing from V, but required by T. It puts the reason in parentheses,
+// and may include more have/want info after that. If non-nil, wrongType is a relevant
+// method that matches in some way. It may have the correct name, but wrong type, or
+// it may have a pointer receiver.
+func (check *Checker) missingMethodReason(V, T Type, m, wrongType *Func) string {
+	var r string
+	var mname string
+	if compilerErrorMessages {
+		mname = m.Name() + " method"
+	} else {
+		mname = "method " + m.Name()
+	}
+	if wrongType != nil {
+		if Identical(m.typ, wrongType.typ) {
+			if m.Name() == wrongType.Name() {
+				r = fmt.Sprintf("(%s has pointer receiver)", mname)
+			} else {
+				r = fmt.Sprintf("(missing %s)\n\t\thave %s^^%s\n\t\twant %s^^%s",
+					mname, wrongType.Name(), wrongType.typ, m.Name(), m.typ)
+			}
+		} else {
+			if compilerErrorMessages {
+				r = fmt.Sprintf("(wrong type for %s)\n\t\thave %s^^%s\n\t\twant %s^^%s",
+					mname, wrongType.Name(), wrongType.typ, m.Name(), m.typ)
+			} else {
+				r = fmt.Sprintf("(wrong type for %s: have %s, want %s)",
+					mname, wrongType.typ, m.typ)
+			}
+		}
+		// This is a hack to print the function type without the leading
+		// 'func' keyword in the have/want printouts. We could change to have
+		// an extra formatting option for types2.Type that doesn't print out
+		// 'func'.
+		r = strings.Replace(r, "^^func", "", -1)
+	} else if IsInterface(T) && !isTypeParam(T) {
+		if isInterfacePtr(V) {
+			r = fmt.Sprintf("(%s is pointer to interface, not interface)", V)
+		}
+	} else if isInterfacePtr(T) && !isTypeParam(T) {
+		r = fmt.Sprintf("(%s is pointer to interface, not interface)", T)
+	}
+	if r == "" {
+		r = fmt.Sprintf("(missing %s)", mname)
+	}
+	return r
+}
+
+func isInterfacePtr(T Type) bool {
+	p, _ := under(T).(*Pointer)
+	return p != nil && IsInterface(p.base) && !isTypeParam(T)
 }
 
 // assertableTo reports whether a value of type V can be asserted to have type T.

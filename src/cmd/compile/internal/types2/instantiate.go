@@ -13,69 +13,75 @@ import (
 	"fmt"
 )
 
-// Instantiate instantiates the type typ with the given type arguments targs.
-// typ must be a *Named or a *Signature type, and its number of type parameters
-// must match the number of provided type arguments. The result is a new,
-// instantiated (not parameterized) type of the same kind (either a *Named or a
-// *Signature). Any methods attached to a *Named are simply copied; they are
-// not instantiated.
+// Instantiate instantiates the type orig with the given type arguments targs.
+// orig must be a *Named or a *Signature type. If there is no error, the
+// resulting Type is a new, instantiated (not parameterized) type of the same
+// kind (either a *Named or a *Signature). Methods attached to a *Named type
+// are also instantiated, and associated with a new *Func that has the same
+// position as the original method, but nil function scope.
 //
-// If ctxt is non-nil, it may be used to de-dupe the instance against previous
-// instances with the same identity.
+// If ctxt is non-nil, it may be used to de-duplicate the instance against
+// previous instances with the same identity. As a special case, generic
+// *Signature origin types are only considered identical if they are pointer
+// equivalent, so that instantiating distinct (but possibly identical)
+// signatures will yield different instances.
 //
-// If verify is set and constraint satisfaction fails, the returned error may
-// be of dynamic type ArgumentError indicating which type argument did not
-// satisfy its corresponding type parameter constraint, and why.
+// If validate is set, Instantiate verifies that the number of type arguments
+// and parameters match, and that the type arguments satisfy their
+// corresponding type constraints. If verification fails, the resulting error
+// may wrap an *ArgumentError indicating which type argument did not satisfy
+// its corresponding type parameter constraint, and why.
 //
-// TODO(rfindley): change this function to also return an error if lengths of
-// tparams and targs do not match.
-func Instantiate(ctxt *Context, typ Type, targs []Type, validate bool) (Type, error) {
-	inst := (*Checker)(nil).instance(nopos, typ, targs, ctxt)
-
-	var err error
+// If validate is not set, Instantiate does not verify the type argument count
+// or whether the type arguments satisfy their constraints. Instantiate is
+// guaranteed to not return an error, but may panic. Specifically, for
+// *Signature types, Instantiate will panic immediately if the type argument
+// count is incorrect; for *Named types, a panic may occur later inside the
+// *Named API.
+func Instantiate(ctxt *Context, orig Type, targs []Type, validate bool) (Type, error) {
 	if validate {
 		var tparams []*TypeParam
-		switch t := typ.(type) {
+		switch t := orig.(type) {
 		case *Named:
 			tparams = t.TypeParams().list()
 		case *Signature:
 			tparams = t.TypeParams().list()
 		}
+		if len(targs) != len(tparams) {
+			return nil, fmt.Errorf("got %d type arguments but %s has %d type parameters", len(targs), orig, len(tparams))
+		}
 		if i, err := (*Checker)(nil).verify(nopos, tparams, targs); err != nil {
-			return inst, ArgumentError{i, err}
+			return nil, &ArgumentError{i, err}
 		}
 	}
 
-	return inst, err
+	inst := (*Checker)(nil).instance(nopos, orig, targs, ctxt)
+	return inst, nil
 }
 
 // instance creates a type or function instance using the given original type
 // typ and arguments targs. For Named types the resulting instance will be
 // unexpanded.
-func (check *Checker) instance(pos syntax.Pos, orig Type, targs []Type, ctxt *Context) Type {
+func (check *Checker) instance(pos syntax.Pos, orig Type, targs []Type, ctxt *Context) (res Type) {
+	var h string
+	if ctxt != nil {
+		h = ctxt.instanceHash(orig, targs)
+		// typ may already have been instantiated with identical type arguments. In
+		// that case, re-use the existing instance.
+		if inst := ctxt.lookup(h, orig, targs); inst != nil {
+			return inst
+		}
+	}
+
 	switch orig := orig.(type) {
 	case *Named:
-		var h string
-		if ctxt != nil {
-			h = ctxt.typeHash(orig, targs)
-			// typ may already have been instantiated with identical type arguments. In
-			// that case, re-use the existing instance.
-			if inst := ctxt.lookup(h, orig, targs); inst != nil {
-				return inst
-			}
-		}
 		tname := NewTypeName(pos, orig.obj.pkg, orig.obj.name, nil)
 		named := check.newNamed(tname, orig, nil, nil, nil) // underlying, tparams, and methods are set when named is resolved
 		named.targs = NewTypeList(targs)
 		named.resolver = func(ctxt *Context, n *Named) (*TypeParamList, Type, []*Func) {
 			return expandNamed(ctxt, n, pos)
 		}
-		if ctxt != nil {
-			// It's possible that we've lost a race to add named to the context.
-			// In this case, use whichever instance is recorded in the context.
-			named = ctxt.update(h, orig, targs, named).(*Named)
-		}
-		return named
+		res = named
 
 	case *Signature:
 		tparams := orig.TypeParams()
@@ -96,10 +102,19 @@ func (check *Checker) instance(pos syntax.Pos, orig Type, targs []Type, ctxt *Co
 		// After instantiating a generic signature, it is not generic
 		// anymore; we need to set tparams to nil.
 		sig.tparams = nil
-		return sig
+		res = sig
+	default:
+		// only types and functions can be generic
+		panic(fmt.Sprintf("%v: cannot instantiate %v", pos, orig))
 	}
-	// only types and functions can be generic
-	panic(fmt.Sprintf("%v: cannot instantiate %v", pos, orig))
+
+	if ctxt != nil {
+		// It's possible that we've lost a race to add named to the context.
+		// In this case, use whichever instance is recorded in the context.
+		res = ctxt.update(h, orig, targs, res)
+	}
+
+	return res
 }
 
 // validateTArgLen verifies that the length of targs and tparams matches,

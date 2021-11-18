@@ -598,7 +598,11 @@ func (check *Checker) updateExprVal(x ast.Expr, val constant.Value) {
 func (check *Checker) convertUntyped(x *operand, target Type) {
 	newType, val, code := check.implicitTypeAndValue(x, target)
 	if code != 0 {
-		check.invalidConversion(code, x, safeUnderlying(target))
+		t := target
+		if !tparamIsIface || !isTypeParam(target) {
+			t = safeUnderlying(target)
+		}
+		check.invalidConversion(code, x, t)
 		x.mode = invalid
 		return
 	}
@@ -677,12 +681,14 @@ func (check *Checker) implicitTypeAndValue(x *operand, target Type) (Type, const
 			return nil, nil, _InvalidUntypedConversion
 		}
 	case *TypeParam:
-		// TODO(gri) review this code - doesn't look quite right
-		ok := u.underIs(func(t Type) bool {
-			target, _, _ := check.implicitTypeAndValue(x, t)
-			return target != nil
-		})
-		if !ok {
+		assert(!tparamIsIface)
+		if !u.underIs(func(u Type) bool {
+			if u == nil {
+				return false
+			}
+			t, _, _ := check.implicitTypeAndValue(x, u)
+			return t != nil
+		}) {
 			return nil, nil, _InvalidUntypedConversion
 		}
 		// keep nil untyped (was bug #39755)
@@ -690,6 +696,22 @@ func (check *Checker) implicitTypeAndValue(x *operand, target Type) (Type, const
 			return Typ[UntypedNil], nil, 0
 		}
 	case *Interface:
+		if tparamIsIface && isTypeParam(target) {
+			if !u.typeSet().underIs(func(u Type) bool {
+				if u == nil {
+					return false
+				}
+				t, _, _ := check.implicitTypeAndValue(x, u)
+				return t != nil
+			}) {
+				return nil, nil, _InvalidUntypedConversion
+			}
+			// keep nil untyped (was bug #39755)
+			if x.isNil() {
+				return Typ[UntypedNil], nil, 0
+			}
+			break
+		}
 		// Values must have concrete dynamic types. If the value is nil,
 		// keep it untyped (this is important for tools such as go vet which
 		// need the dynamic type for argument checking of say, print
@@ -958,8 +980,9 @@ func (check *Checker) binary(x *operand, e ast.Expr, lhs, rhs ast.Expr, op token
 		return
 	}
 
+	// TODO(gri) make canMix more efficient - called for each binary operation
 	canMix := func(x, y *operand) bool {
-		if IsInterface(x.typ) || IsInterface(y.typ) {
+		if IsInterface(x.typ) && !isTypeParam(x.typ) || IsInterface(y.typ) && !isTypeParam(y.typ) {
 			return true
 		}
 		if allBoolean(x.typ) != allBoolean(y.typ) {
@@ -1216,7 +1239,11 @@ func (check *Checker) exprInternal(x *operand, e ast.Expr, hint Type) exprKind {
 		case hint != nil:
 			// no composite literal type present - use hint (element type of enclosing type)
 			typ = hint
-			base, _ = deref(under(typ)) // *T implies &T{}
+			base = typ
+			if !isTypeParam(typ) {
+				base = under(typ)
+			}
+			base, _ = deref(base) // *T implies &T{}
 
 		default:
 			// TODO(gri) provide better error messages depending on context
@@ -1427,6 +1454,11 @@ func (check *Checker) exprInternal(x *operand, e ast.Expr, hint Type) exprKind {
 	case *ast.TypeAssertExpr:
 		check.expr(x, e.X)
 		if x.mode == invalid {
+			goto Error
+		}
+		// TODO(gri) we may want to permit type assertions on type parameter values at some point
+		if isTypeParam(x.typ) {
+			check.invalidOp(x, _InvalidAssert, "cannot use type assertion on type parameter value %s", x)
 			goto Error
 		}
 		xtyp, _ := under(x.typ).(*Interface)
