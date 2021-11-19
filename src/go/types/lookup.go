@@ -50,8 +50,8 @@ func LookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 	// Thus, if we have a named pointer type, proceed with the underlying
 	// pointer type but discard the result if it is a method since we would
 	// not have found it for T (see also issue 8590).
-	if t := asNamed(T); t != nil {
-		if p, _ := safeUnderlying(t).(*Pointer); p != nil {
+	if t, _ := T.(*Named); t != nil {
+		if p, _ := t.Underlying().(*Pointer); p != nil {
 			obj, index, indirect = lookupFieldOrMethod(p, false, pkg, name)
 			if _, ok := obj.(*Func); ok {
 				return nil, nil, false
@@ -80,12 +80,8 @@ func lookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 
 	typ, isPtr := deref(T)
 
-	// *typ where typ is an interface or type parameter has no methods.
+	// *typ where typ is an interface has no methods.
 	if isPtr {
-		// don't look at under(typ) here - was bug (issue #47747)
-		if _, ok := typ.(*TypeParam); ok {
-			return
-		}
 		if _, ok := under(typ).(*Interface); ok {
 			return
 		}
@@ -114,7 +110,7 @@ func lookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 
 			// If we have a named type, we may have associated methods.
 			// Look for those first.
-			if named := asNamed(typ); named != nil {
+			if named, _ := typ.(*Named); named != nil {
 				if seen[named] {
 					// We have seen this type before, at a more shallow depth
 					// (note that multiples of this type at the current depth
@@ -129,6 +125,7 @@ func lookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 				seen[named] = true
 
 				// look for a matching attached method
+				named.resolve(nil)
 				if i, m := lookupMethod(named.methods, pkg, name); m != nil {
 					// potential match
 					// caution: method may not have a proper signature yet
@@ -468,6 +465,13 @@ func (check *Checker) assertableTo(V *Interface, T Type) (method, wrongType *Fun
 // Otherwise it returns (typ, false).
 func deref(typ Type) (Type, bool) {
 	if p, _ := typ.(*Pointer); p != nil {
+		// p.base should never be nil, but be conservative
+		if p.base == nil {
+			if debug {
+				panic("pointer with nil base type (possibly due to an invalid cyclic declaration)")
+			}
+			return Typ[Invalid], true
+		}
 		return p.base, true
 	}
 	return typ, false
