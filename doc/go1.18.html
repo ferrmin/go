@@ -71,12 +71,6 @@ proposal</a>.
   The <code>GOAMD64</code> environment variable defaults to <code>v1</code>.
 </p>
 
-<h3 id="ppc64">PPC64</h3>
-
-<p><!-- CL 353969 -->
-  TODO: <a href="https://golang.org/cl/353969">https://golang.org/cl/353969</a>: internal/buildcfg: enable register ABI for PPC64
-</p>
-
 <h3 id="riscv">RISC-V</h3>
 
 <p><!-- golang.org/issue/47100, CL 334872 -->
@@ -170,6 +164,25 @@ proposal</a>.
 
 <h2 id="compiler">Compiler</h2>
 
+<p><!-- https://golang.org/issue/40724 -->
+  Go 1.17 <a href=go1.17#compiler>implemented</a> a new way of passing
+  function arguments and results using registers instead of the stack
+  on 64-bit x86 architecture on selected operating systems.
+  Go 1.18 expands the supported platforms to include 64-bit ARM (<code>GOARCH=arm64</code>),
+  big- and little-endian 64-bit PowerPC (<code>GOARCH=ppc64</code>, <code>ppc64le</code>),
+  as well as 64-bit x86 architecture (<code>GOARCH=amd64</code>)
+  on all operating systems.
+  On 64-bit ARM and 64-bit PowerPC systems, benchmarking shows
+  performance improvements of 10% or more.
+</p>
+
+<p>
+  As <a href=go1.17#compiler>mentioned</a> in the Go 1.17 release notes,
+  this change does not affect the functionality of any safe Go code and
+  is designed to have no impact on most assembly code. See the
+  <a href=go1.17#compiler>Go 1.17 release notes</a> for more details.
+</p>
+
 <p><!-- CL 298611 -->
   TODO: <a href="https://golang.org/cl/298611">https://golang.org/cl/298611</a>: cmd/compile: add -asan option
 </p>
@@ -236,11 +249,17 @@ proposal</a>.
 <dl id="bufio"><dt><a href="/pkg/bufio/">bufio</a></dt>
   <dd>
     <p><!-- CL 345569 -->
-      TODO: <a href="https://golang.org/cl/345569">https://golang.org/cl/345569</a>: add Writer.AvailableBuffer
+      The new <a href="/pkg/bufio#AvailableBuffer"><code>Writer.AvailableBuffer</code></a>
+      method returns an empty buffer with a possibly non-empty capacity for use
+      with append-like APIs. After appending, the buffer can be provided to a
+			succeeding <code>Write</code> call and possibly avoid any copying.
     </p>
 
     <p><!-- CL 345570 -->
-      TODO: <a href="https://golang.org/cl/345570">https://golang.org/cl/345570</a>: make Reader.Reset and Writer.Reset work on the zero value
+      The methods <a href="/pkg/bufio#Reader.Reset"><code>Reader.Reset</code></a> and
+      <a href="/pkg/bufio#Writer.Reset"><code>Writer.Reset</code></a>
+      now use the default buffer size when called on objects with a
+      <code>nil</code> buffer.
     </p>
   </dd>
 </dl><!-- bufio -->
@@ -248,7 +267,8 @@ proposal</a>.
 <dl id="bytes"><dt><a href="/pkg/bytes/">bytes</a></dt>
   <dd>
     <p><!-- CL 332771 -->
-      TODO: <a href="https://golang.org/cl/332771">https://golang.org/cl/332771</a>: avoid allocations in Trim/TrimLeft/TrimRight
+      <a href="/pkg/bytes#Trim"><code>bytes.Trim</code></a> and related
+      functions, have had their most common use cases optimized.
     </p>
 
     <p><!-- CL 359485 -->
@@ -388,7 +408,8 @@ proposal</a>.
     </p>
 
     <p><!-- CL 332771 -->
-      TODO: <a href="https://golang.org/cl/332771">https://golang.org/cl/332771</a>: avoid allocations in Trim/TrimLeft/TrimRight
+      <a href="/pkg/bytes#Trim"><code>strings.Trim</code></a> and related functions
+      functions, have had their most common use cases optimized.
     </p>
 
     <p><!-- CL 359485 -->
