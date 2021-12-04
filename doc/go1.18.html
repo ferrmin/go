@@ -59,9 +59,9 @@ Do not send CLs removing the interior tags from such phrases.
 <h3 id="generics">Generics</h3>
 
 <p>
-Go 1.18 includes an implementation of generics as described
-by <a href="https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md">the
-proposal</a>.
+  Go 1.18 includes an implementation of generics as described
+  by <a href="https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md">the
+  generics proposal</a>.
 </p>
 
 <p>
@@ -74,16 +74,28 @@ proposal</a>.
   </ul>
 </p>
 
-<h2 id="ports">Ports</h2>
-
-<h3 id="freebsd">FreeBSD</h3>
+<h3 id="fuzzing">Fuzzing</h3>
 
 <p>
-  Go 1.18 is the last release that is supported on FreeBSD 11.x, which has
-  already reached end-of-life. Go 1.19 will require FreeBSD 12.2+ or FreeBSD
-  13.0+.
-  FreeBSD 13.0+ will require a kernel with the COMPAT_FREEBSD12 option set (this is the default).
+  Go 1.18 includes an implementation of fuzzing as described by
+  <a href="https://golang.org/issue/44551">the fuzzing proposal</a>.
 </p>
+
+<p>
+  See the <a href="https://go.dev/doc/fuzz">fuzzing landing page</a> to get
+  started.
+</p>
+
+<p>
+  Please be aware that fuzzing can consume a lot of memory and may impact your
+  machine’s performance while it runs. Also be aware that the fuzzing engine
+  writes values that expand test coverage to a fuzz cache directory within
+  <code>$GOCACHE/fuzz</code> while it runs. There is currently no limit to the
+  number of files or total bytes that may be written to the fuzz cache, so it
+  may occupy a large amount of storage (possibly several GBs).
+</p>
+
+<h2 id="ports">Ports</h2>
 
 <h3 id="amd64">AMD64</h3>
 
@@ -105,12 +117,30 @@ proposal</a>.
   now supports the <code>c-archive</code> and <code>c-shared</code> build modes.
 </p>
 
+<h3 id="windows">Windows</h3>
+
+<p><!-- https://golang.org/issue/49759 -->
+  The <code>windows/arm</code> and <code>windows/arm64</code> ports now support
+  non-cooperative preemption, bringing that capability to all four Windows
+  ports, which should hopefully address subtle bugs encountered when calling
+  into Win32 functions that block for extended periods of time.
+</p>
+
 <h3 id="ios">iOS</h3>
 
 <p><!-- golang.org/issue/48076, golang.org/issue/49616 -->
   On iOS (the <code>ios/arm64</code> port)
   and iOS simulator running on AMD64-based macOS (the <code>ios/amd64</code> port),
   Go 1.18 now requires iOS 12 or later; support for previous versions has been discontinued.
+</p>
+
+<h3 id="freebsd">FreeBSD</h3>
+
+<p>
+  Go 1.18 is the last release that is supported on FreeBSD 11.x, which has
+  already reached end-of-life. Go 1.19 will require FreeBSD 12.2+ or FreeBSD
+  13.0+.
+  FreeBSD 13.0+ will require a kernel with the COMPAT_FREEBSD12 option set (this is the default).
 </p>
 
 <h2 id="tools">Tools</h2>
@@ -200,14 +230,7 @@ proposal</a>.
 
 <h2 id="runtime">Runtime</h2>
 
-<p><!-- https://golang.org/issue/49759 -->
-  The <code>windows/arm</code> and <code>windows/arm64</code> ports now support
-  non-cooperative preemption, bringing that capability to all four Windows
-  ports, which should hopefully address subtle bugs encountered when calling
-  into Win32 functions that block for extended periods of time.
-</p>
-
-<p><!-- https://github.com/golang/go/issues/44167-->
+<p><!-- https://golang.org/issue/44167 -->
   The garbage collector now includes non-heap sources of garbage collector work
   (e.g., stack scanning) when determining how frequently to run. As a result,
   garbage collector overhead is more predictable when these sources are
@@ -222,27 +245,6 @@ proposal</a>.
   been tuned to work more aggressively as a result.
 </p>
 
-<h2 id="compiler">Compiler</h2>
-
-<p><!-- https://golang.org/issue/40724 -->
-  Go 1.17 <a href=go1.17#compiler>implemented</a> a new way of passing
-  function arguments and results using registers instead of the stack
-  on 64-bit x86 architecture on selected operating systems.
-  Go 1.18 expands the supported platforms to include 64-bit ARM (<code>GOARCH=arm64</code>),
-  big- and little-endian 64-bit PowerPC (<code>GOARCH=ppc64</code>, <code>ppc64le</code>),
-  as well as 64-bit x86 architecture (<code>GOARCH=amd64</code>)
-  on all operating systems.
-  On 64-bit ARM and 64-bit PowerPC systems, benchmarking shows
-  performance improvements of 10% or more.
-</p>
-
-<p>
-  As <a href=go1.17#compiler>mentioned</a> in the Go 1.17 release notes,
-  this change does not affect the functionality of any safe Go code and
-  is designed to have no impact on most assembly code. See the
-  <a href=go1.17#compiler>Go 1.17 release notes</a> for more details.
-</p>
-
 <p><!-- CL 352057, https://golang.org/issue/45728 -->
   Go 1.17 generally improved the formatting of arguments in stack traces,
   but could print inaccurate values for arguments passed in registers.
@@ -250,9 +252,39 @@ proposal</a>.
   after each value that may be inaccurate.
 </p>
 
+<h2 id="compiler">Compiler</h2>
+
+<p><!-- https://golang.org/issue/40724 -->
+  Go 1.17 <a href="go1.17#compiler">implemented</a> a new way of passing
+  function arguments and results using registers instead of the stack
+  on 64-bit x86 architecture on selected operating systems.
+  Go 1.18 expands the supported platforms to include 64-bit ARM (<code>GOARCH=arm64</code>),
+  big- and little-endian 64-bit PowerPC (<code>GOARCH=ppc64</code>, <code>ppc64le</code>),
+  as well as 64-bit x86 architecture (<code>GOARCH=amd64</code>)
+  on all operating systems.
+  On 64-bit ARM and 64-bit PowerPC systems, benchmarking shows
+  typical performance improvements of 10% or more.
+</p>
+
+<p>
+  As <a href="go1.17#compiler">mentioned</a> in the Go 1.17 release notes,
+  this change does not affect the functionality of any safe Go code and
+  is designed to have no impact on most assembly code. See the
+  <a href="go1.17#compiler">Go 1.17 release notes</a> for more details.
+</p>
+
+<p><!-- CL 355497, CL 356869 -->
+  The compiler now can inline functions that contain range loops or
+  labeled for loops.
+</p>
+
 <p><!-- CL 298611 -->
   The new compiler <code>-asan</code> option supports the
   new <code>go</code> command <code>-asan</code> option.
+</p>
+
+<p>
+  TODO: Mention build speed impact.
 </p>
 
 <h2 id="linker">Linker</h2>
@@ -344,6 +376,10 @@ proposal</a>.
       handle Unicode punctuation and language-specific capitalization rules, and is superseded by the
       <a href="https://golang.org/x/text/cases">golang.org/x/text/cases</a> package.
     </p>
+
+    <p><!-- CL 351710 -->
+      TODO: bytes.Cut.
+    </p>
   </dd>
 </dl><!-- bytes -->
 
@@ -370,6 +406,51 @@ proposal</a>.
   </dd>
 </dl>
 
+<dl id="go/ast"><dt><a href="/pkg/go/ast/">go/ast</a></dt>
+  <dd>
+    <p><!-- https://golang.org/issue/47781, CL 325689, CL 327149, CL 348375, CL 348609 -->
+      Per the proposal
+      <a href="https://go.googlesource.com/proposal/+/master/design/47781-parameterized-go-ast.md">
+        Additions to go/ast and go/token to support parameterized functions and types
+      </a>
+      the following additions are made to the <a href="/pkg/go/ast"><code>go/ast</code></a> package:
+      <ul>
+        <li>
+          the <a href="/pkg/go/ast/#FuncType"><code>FuncType</code></a>
+          and <a href="/pkg/go/ast/#TypeSpec"><code>TypeSpec</code></a>
+          nodes have a new field <code>TypeParams</code> to hold type parameters, if any.
+        </li>
+        <li>
+          The new expression node <a href="/pkg/go/ast/#IndexListExpr"><code>IndexListExpr</code></a>
+          represents index expressions with multiple indices, used for function and type instantiations
+          with more than one explicit type argument.
+        </li>
+      </ul>
+    </p>
+  </dd>
+</dl>
+
+<dl id="go/constant"><dt><a href="/pkg/go/constant/">go/constant</a></dt>
+  <dd>
+    <p><!-- https://golang.org/issue/46211, CL 320491 -->
+      The new <a href="/pkg/go/constant/#Kind.String"><code>Kind.String</code></a>
+      method returns a human-readable name for the receiver kind.
+    </p>
+  </dd>
+</dl>
+
+<dl id="go/token"><dt><a href="/pkg/go/token/">go/token</a></dt>
+  <dd>
+    <p><!-- https://golang.org/issue/47781, CL 324992 -->
+      The new constant <a href="/pkg/go/token/#TILDE"><code>TILDE</code></a>
+      represents the <code>~</code> token per the proposal
+      <a href="https://go.googlesource.com/proposal/+/master/design/47781-parameterized-go-ast.md">
+        Additions to go/ast and go/token to support parameterized functions and types
+      </a>.
+    </p>
+  </dd>
+</dl>
+
 <dl id="image/draw"><dt><a href="/pkg/image/draw/">image/draw</a></dt>
   <dd>
     <p><!-- CL 340049 -->
@@ -387,6 +468,12 @@ proposal</a>.
   <dd>
     <p><!-- CL 340261 -->
       <a href="/pkg/net#Error"><code>net.Error.Temporary</code></a> has been deprecated.
+    </p>
+  </dd>
+
+  <dd>
+    <p>
+      TODO: Several new net APIs.
     </p>
   </dd>
 </dl><!-- net -->
@@ -465,6 +552,17 @@ proposal</a>.
       <a href="/pkg/reflect#Value.FieldByIndex"><code>Value.FieldByIndex</code></a>
       when stepping through a nil pointer to an embedded struct.
     </p>
+
+    <p><!-- CL 341333 -->
+      <a href="/pkg/reflect#Ptr"><code>reflect.Ptr</code></a> and
+      <a href="/pkg/reflect#PtrTo"><code>reflect.PtrTo</code></a>
+      have been renamed to
+      <a href="/pkg/reflect#Pointer"><code>reflect.Pointer</code></a> and
+      <a href="/pkg/reflect#Pointer"><code>reflect.PointerTo</code></a>,
+      respectively, for consistency with the rest of the reflect package.
+      The old names will continue to work, but will be deprecated in a
+      future Go release.
+    </p>
   </dd>
 </dl><!-- reflect -->
 
@@ -502,6 +600,10 @@ proposal</a>.
       The <a href="/pkg/strings/#Title"><code>Title</code></a> function is now deprecated. It doesn't
       handle Unicode punctuation and language-specific capitalization rules, and is superseded by the
       <a href="https://golang.org/x/text/cases">golang.org/x/text/cases</a> package.
+    </p>
+
+    <p><!-- CL 351710 -->
+      TODO: strings.Cut.
     </p>
   </dd>
 </dl><!-- strings -->
