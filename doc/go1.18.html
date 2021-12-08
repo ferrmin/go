@@ -25,10 +25,6 @@ Do not send CLs removing the interior tags from such phrases.
 
 <h2 id="language">Changes to the language</h2>
 
-<p>
-  TODO: complete this section
-</p>
-
 <h3 id="generics">Generics</h3>
 
 <p><!-- https://golang.org/issue/43651, https://golang.org/issue/45346 -->
@@ -407,6 +403,16 @@ Do not send CLs removing the interior tags from such phrases.
 
 <dl id="bytes"><dt><a href="/pkg/bytes/">bytes</a></dt>
   <dd>
+    <p><!-- CL 351710 -->
+      The new <a href="/pkg/bytes/#Cut"><code>Cut</code></a> function
+      slices a <code>[]byte</code> around a separator. It can replace
+      and simplify many common uses of
+      <a href="/pkg/bytes/#Index"><code>Index</code></a>,
+      <a href="/pkg/bytes/#IndexByte"><code>IndexByte</code></a>,
+      <a href="/pkg/bytes/#IndexRune"><code>IndexRune</code></a>,
+      and <a href="/pkg/bytes/#SplitN"><code>SplitN</code></a>.
+    </p>
+
     <p><!-- CL 323318, CL 332771 -->
       <a href="/pkg/bytes/#Trim"><code>Trim</code></a>, <a href="/pkg/bytes/#TrimLeft"><code>TrimLeft</code></a>,
       and <a href="/pkg/bytes/#TrimRight"><code>TrimRight</code></a> are now allocation free and, especially for 
@@ -417,10 +423,6 @@ Do not send CLs removing the interior tags from such phrases.
       The <a href="/pkg/bytes/#Title"><code>Title</code></a> function is now deprecated. It doesn't
       handle Unicode punctuation and language-specific capitalization rules, and is superseded by the
       <a href="https://golang.org/x/text/cases">golang.org/x/text/cases</a> package.
-    </p>
-
-    <p><!-- CL 351710 -->
-      TODO: bytes.Cut.
     </p>
   </dd>
 </dl><!-- bytes -->
@@ -713,6 +715,16 @@ Do not send CLs removing the interior tags from such phrases.
 
 <dl id="strings"><dt><a href="/pkg/strings/">strings</a></dt>
   <dd>
+    <p><!-- CL 351710 -->
+      The new <a href="/pkg/strings/#Cut"><code>Cut</code></a> function
+      slices a <code>string</code> around a separator. It can replace
+      and simplify many common uses of
+      <a href="/pkg/strings/#Index"><code>Index</code></a>,
+      <a href="/pkg/strings/#IndexByte"><code>IndexByte</code></a>,
+      <a href="/pkg/strings/#IndexRune"><code>IndexRune</code></a>,
+      and <a href="/pkg/strings/#SplitN"><code>SplitN</code></a>.
+    </p>
+
     <p><!-- CL 345849 -->
       The new <a href="/pkg/strings/#Clone"><code>Clone</code></a> function copies the input
       <code>string</code> without the returned cloned <code>string</code> referencing
@@ -729,10 +741,6 @@ Do not send CLs removing the interior tags from such phrases.
       The <a href="/pkg/strings/#Title"><code>Title</code></a> function is now deprecated. It doesn't
       handle Unicode punctuation and language-specific capitalization rules, and is superseded by the
       <a href="https://golang.org/x/text/cases">golang.org/x/text/cases</a> package.
-    </p>
-
-    <p><!-- CL 351710 -->
-      TODO: strings.Cut.
     </p>
   </dd>
 </dl><!-- strings -->
@@ -782,11 +790,17 @@ Do not send CLs removing the interior tags from such phrases.
 <dl id="testing"><dt><a href="/pkg/testing/">testing</a></dt>
   <dd>
     <p><!-- CL 343883 -->
-      TODO: <a href="https://golang.org/cl/343883">https://golang.org/cl/343883</a>: increase alternation precedence
+      The precedence of <code>/</code> in the argument for <code>-run</code> and
+      <code>-bench</code> has been increased. <code>A/B|C/D</code> used to be
+      treated as <code>A/(B|C)/D</code> and is now treated as
+      <code>(A/B)/(C/D)</code>.
     </p>
 
     <p><!-- CL 356669 -->
-      TODO: <a href="https://golang.org/cl/356669">https://golang.org/cl/356669</a>: skip extra -count iterations if there are no tests
+      If the <code>-run</code> option does not select any tests, the
+      <code>-count</code> option is ignored. This could change the behavior of
+      existing tests in the unlikely case that a test changes the set of subtests
+      that are run each time the test function itself is run.
     </p>
   </dd>
 </dl><!-- testing -->
