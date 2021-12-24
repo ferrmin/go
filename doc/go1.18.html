@@ -570,6 +570,17 @@ Do not send CLs removing the interior tags from such phrases.
   </dd>
 </dl><!-- debug/elf -->
 
+<dl id="debug/plan9obj"><dt><a href="/pkg/debug/plan9obj/">debug/plan9obj</a></dt>
+  <dd>
+    <p><!-- CL 350229 -->
+      The <a href="/pkg/debug/plan9obj#File.Symbols">File.Symbols</a>
+      method now returns the new exported error
+      value <a href="/pkg/debug/plan9obj#ErrNoSymbols">ErrNoSymbols</a>
+      if the file has no symbol section.
+    </p>
+  </dd>
+</dl><!-- debug/plan9obj -->
+
 <dl id="go/ast"><dt><a href="/pkg/go/ast/">go/ast</a></dt>
   <dd>
     <p><!-- https://golang.org/issue/47781, CL 325689, CL 327149, CL 348375, CL 348609 -->
@@ -844,6 +855,27 @@ Do not send CLs removing the interior tags from such phrases.
     </p>
   </dd>
 </dl><!-- regexp -->
+
+<dl id="runtime/debug"><dt><a href="/pkg/runtime/debug/">runtime/debug</a></dt>
+  <dd>
+    <p><!-- CL 354569 -->
+      The <a href="/pkg/runtime/debug#BuildInfo"><code>BuildInfo</code></a>
+      struct has two new fields, containing additional information
+      about how the binary was built:
+      <ul>
+	<li><a href="/pkg/runtime/debug#BuildInfo.GoVersion"><code>GoVersion</code></a>
+	  holds the version of Go used to build the binary.
+	</li>
+	<li>
+	  <a href="/pkg/runtime/debug#BuildInfo.Settings"><code>Settings</code></a>
+	  is a slice of
+	  <a href="/pkg/runtime/debug#BuildSettings"><code>BuildSettings</code></a>
+	  structs holding key/value pairs describing the build.
+	</li>
+      </ul>
+    </p>
+  </dd>
+</dl><!-- runtime/debug -->
 
 <dl id="strconv"><dt><a href="/pkg/strconv/">strconv</a></dt>
   <dd>
