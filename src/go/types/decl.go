@@ -277,7 +277,9 @@ loop:
 			check.trace(obj.Pos(), "## cycle contains: %d values, %d type definitions", nval, ndef)
 		}
 		defer func() {
-			if !valid {
+			if valid {
+				check.trace(obj.Pos(), "=> cycle is valid")
+			} else {
 				check.trace(obj.Pos(), "=> error: cycle is invalid")
 			}
 		}()
@@ -303,96 +305,6 @@ loop:
 	return false
 }
 
-type typeInfo uint
-
-// validType verifies that the given type does not "expand" infinitely
-// producing a cycle in the type graph. Cycles are detected by marking
-// defined types.
-// (Cycles involving alias types, as in "type A = [10]A" are detected
-// earlier, via the objDecl cycle detection mechanism.)
-func (check *Checker) validType(typ Type, path []Object) typeInfo {
-	const (
-		unknown typeInfo = iota
-		marked
-		valid
-		invalid
-	)
-
-	switch t := typ.(type) {
-	case *Array:
-		return check.validType(t.elem, path)
-
-	case *Struct:
-		for _, f := range t.fields {
-			if check.validType(f.typ, path) == invalid {
-				return invalid
-			}
-		}
-
-	case *Union:
-		for _, t := range t.terms {
-			if check.validType(t.typ, path) == invalid {
-				return invalid
-			}
-		}
-
-	case *Interface:
-		for _, etyp := range t.embeddeds {
-			if check.validType(etyp, path) == invalid {
-				return invalid
-			}
-		}
-
-	case *Named:
-		// If t is parameterized, we should be considering the instantiated (expanded)
-		// form of t, but in general we can't with this algorithm: if t is an invalid
-		// type it may be so because it infinitely expands through a type parameter.
-		// Instantiating such a type would lead to an infinite sequence of instantiations.
-		// In general, we need "type flow analysis" to recognize those cases.
-		// Example: type A[T any] struct{ x A[*T] } (issue #48951)
-		// In this algorithm we always only consider the original, uninstantiated type.
-		// This won't recognize some invalid cases with parameterized types, but it
-		// will terminate.
-		t = t.orig
-
-		// don't touch the type if it is from a different package or the Universe scope
-		// (doing so would lead to a race condition - was issue #35049)
-		if t.obj.pkg != check.pkg {
-			return valid
-		}
-
-		// don't report a 2nd error if we already know the type is invalid
-		// (e.g., if a cycle was detected earlier, via under).
-		if t.underlying == Typ[Invalid] {
-			t.info = invalid
-			return invalid
-		}
-
-		switch t.info {
-		case unknown:
-			t.info = marked
-			t.info = check.validType(t.fromRHS, append(path, t.obj)) // only types of current package added to path
-		case marked:
-			// cycle detected
-			for i, tn := range path {
-				if t.obj.pkg != check.pkg {
-					panic("type cycle via package-external type")
-				}
-				if tn == t.obj {
-					check.cycleError(path[i:])
-					t.info = invalid
-					t.underlying = Typ[Invalid]
-					return invalid
-				}
-			}
-			panic("cycle start not found")
-		}
-		return t.info
-	}
-
-	return valid
-}
-
 // cycleError reports a declaration cycle starting with
 // the object in cycle that is "first" in the source.
 func (check *Checker) cycleError(cycle []Object) {
@@ -401,7 +313,16 @@ func (check *Checker) cycleError(cycle []Object) {
 	//           cycle? That would be more consistent with other error messages.
 	i := firstInSrc(cycle)
 	obj := cycle[i]
-	check.errorf(obj, _InvalidDeclCycle, "illegal cycle in declaration of %s", obj.Name())
+	// If obj is a type alias, mark it as valid (not broken) in order to avoid follow-on errors.
+	tname, _ := obj.(*TypeName)
+	if tname != nil && tname.IsAlias() {
+		check.validAlias(tname, Typ[Invalid])
+	}
+	if tname != nil && compilerErrorMessages {
+		check.errorf(obj, _InvalidDeclCycle, "invalid recursive type %s", obj.Name())
+	} else {
+		check.errorf(obj, _InvalidDeclCycle, "illegal cycle in declaration of %s", obj.Name())
+	}
 	for range cycle {
 		check.errorf(obj, _InvalidDeclCycle, "\t%s refers to", obj.Name()) // secondary error, \t indented
 		i++
@@ -620,7 +541,9 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *ast.TypeSpec, def *Named) {
 
 	var rhs Type
 	check.later(func() {
-		check.validType(obj.typ, nil)
+		if t, _ := obj.typ.(*Named); t != nil { // type may be invalid
+			check.validType(t)
+		}
 		// If typ is local, an error was already reported where typ is specified/defined.
 		if check.isImportedConstraint(rhs) && !check.allowVersion(check.pkg, 1, 18) {
 			check.errorf(tdecl.Type, _UnsupportedFeature, "using type constraint %s requires go1.18 or later", rhs)
@@ -641,9 +564,9 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *ast.TypeSpec, def *Named) {
 			check.errorf(atPos(tdecl.Assign), _BadDecl, "type aliases requires go1.9 or later")
 		}
 
-		obj.typ = Typ[Invalid]
+		check.brokenAlias(obj)
 		rhs = check.varType(tdecl.Type)
-		obj.typ = rhs
+		check.validAlias(obj, rhs)
 		return
 	}
 
