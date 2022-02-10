@@ -1,6 +1,6 @@
 <!--{
 	"Title": "The Go Programming Language Specification - Go 1.18 Draft (incomplete)",
-	"Subtitle": "Version of Feb 8, 2022",
+	"Subtitle": "Version of Feb 9, 2022",
 	"Path": "/ref/spec"
 }-->
 
@@ -679,6 +679,8 @@ or <a href="#Conversions">conversion</a>, or implicitly when used in a
 operand in an <a href="#Expressions">expression</a>.
 It is an error if the constant value
 cannot be <a href="#Representability">represented</a> as a value of the respective type.
+If the type is a type parameter, the constant is converted into a non-constant
+value of the type parameter.
 </p>
 
 <p>
@@ -2034,7 +2036,7 @@ interface{ int; string }       // no specific types (intersection is empty)
 </pre>
 
 <p>
-An interface <code>T</code> is called <i>structural</i> if one of the following
+An interface <code>T</code> has a <i>core type</i> if one of the following
 conditions is satisfied:
 </p>
 
@@ -2051,8 +2053,11 @@ direction.
 </ol>
 
 <p>
-A structural interface has a <i>structural type</i> which is, depending on the
-condition that is satisfied, either:
+All other interfaces don't have a core type.
+</p>
+
+<p>
+The core type is, depending on the condition that is satisfied, either:
 </p>
 
 <ol>
@@ -2067,7 +2072,7 @@ depending on the direction of the directional channels present.
 </ol>
 
 <p>
-Examples of structural interfaces with their structural types:
+Examples of interfaces with core types:
 </p>
 
 <pre>
@@ -2079,7 +2084,7 @@ interface{ ~[]*data; String() string }    // []*data
 </pre>
 
 <p>
-Examples of non-structural interfaces:
+Examples of interfaces whithout core types:
 </p>
 
 <pre>
@@ -2309,7 +2314,8 @@ ExpressionList = Expression { "," Expression } .
 
 <p>
 If the type is present, all constants take the type specified, and
-the expressions must be <a href="#Assignability">assignable</a> to that type.
+the expressions must be <a href="#Assignability">assignable</a> to that type,
+which must not be a type parameter.
 If the type is omitted, the constants take the
 individual types of the corresponding expressions.
 If the expression values are untyped <a href="#Constants">constants</a>,
@@ -4497,19 +4503,21 @@ min(1.0, 2)    // illegal: default type float64 (for 1.0) doesn't match default 
 <h4 id="Constraint_type_inference">Constraint type inference</h3>
 
 <!--
-	The next paragraph needs to be updated for the new definition of structural type:
-	The structural type of an interface is the single underlying type of its type set,
+	The next paragraph needs to be updated for the new definition of core type:
+	The core type of an interface is the single underlying type of its type set,
 	if it exists. But for constraint type inference, if the type set consists of exactly
 	one type, we want to use that one type (which may be a defined type, different from
-	its underlying == structural type).
+	its underlying == core type).
 -->
 
 <p>
-Constraint type inference infers type arguments from already known
-type arguments by considering <a href="#Structure_of_interfaces">structural type constraints</a>:
-if the structural type <code>T</code> of a structural constraint is parameterized,
-<a href="#Type_unification">unifying</a> a known type argument with <code>T</code> may
-infer type arguments for other type parameters used by the structural type.
+Constraint type inference infers type arguments by considering type constraints.
+If a type parameter <code>P</code> has a constraint with a
+<a href="#Structure_of_interfaces">core type</a> <code>C</code>,
+<a href="#Type_unification">unifying</a> <code>P</code> with <code>C</code>
+may infer additional type arguments, either the type argument for <code>P</code>,
+or if that is already known, possibly the type arguments for type parameters
+used in <code>C</code>.
 </p>
 
 <p>
@@ -4523,8 +4531,8 @@ For instance, consider the type parameter list with type parameters <code>List</
 
 <p>
 Constraint type inference can deduce the type of <code>Elem</code> from the type argument
-for <code>List</code> because <code>Elem</code> is a type parameter in the structural constraint
-<code>~[]Elem</code> for <code>List</code>.
+for <code>List</code> because <code>Elem</code> is a type parameter in the core type
+<code>[]Elem</code> of <code>List</code>.
 If the type argument is <code>Bytes</code>:
 </p>
 
@@ -4533,7 +4541,7 @@ type Bytes []byte
 </pre>
 
 <p>
-unifying the underlying type of <code>Bytes</code> with the structural constraint means
+unifying the underlying type of <code>Bytes</code> with the core type means
 unifying <code>[]byte</code> with <code>[]Elem</code>. That unification succeeds and yields
 the <a href="#Type_unification">substitution map</a> entry
 <code>Elem</code> &RightArrow; <code>byte</code>.
@@ -4548,8 +4556,8 @@ substitution map <i>M</i>
 
 <ol>
 <li>
-For all type parameters with a structural constraint, unify the type parameter with the structural
-type of its constraint. If any unification fails, constraint type inference fails.
+For all type parameters with a core type, unify the type parameter with the core
+type. If any unification fails, constraint type inference fails.
 </li>
 
 <li>
@@ -4584,7 +4592,7 @@ the initial substitution map <i>M</i> contains the entry <code>A</code> &RightAr
 
 <p>
 In the first phase, the type parameters <code>B</code> and <code>C</code> are unified
-with the structural type of their respective constraints. This adds the entries
+with the core type of their respective constraints. This adds the entries
 <code>B</code> &RightArrow; <code>[]C</code> and <code>C</code> &RightArrow; <code>*A</code>
 to <i>M</i>.
 
@@ -5192,7 +5200,6 @@ as for non-constant <code>x</code>.
 <p>
 Converting a constant to a type that is not a <a href="#Type_parameters">type parameter</a>
 yields a typed constant.
-Converting a constant to a type parameter yields a non-constant value of that type.	
 </p>
 
 <pre>
@@ -5209,6 +5216,29 @@ string([]byte{'a'})      // not a constant: []byte{'a'} is not a constant
 int(1.2)                 // illegal: 1.2 cannot be represented as an int
 string(65.0)             // illegal: 65.0 is not an integer constant
 </pre>
+
+<p>
+Converting a constant to a type parameter yields a <i>non-constant</i> value of that type,
+with the value represented as a value of the type argument that the type parameter
+is instantiated with.
+For example, given the function:
+</p>
+
+<pre>
+func f[P ~float32|~float64]() {
+	… P(1.1) …
+}
+</pre>
+
+<p>
+the conversion <code>P(1.1)</code> results in a non-constant value of type <code>P</code>
+and the value <code>1.1</code> is represented as a <code>float32</code> or a <code>float64</code>
+depending on the type argument for <code>f</code>.
+Accordingly, if <code>f</code> is instantiated with a <code>float32</code> type,
+the numeric value of the expression <code>P(1.1) + 1.2</code> will be computed
+with the same precision as the corresponding non-constant <code>float32</code>
+addition.
+</p>
 
 <p>
 A non-constant value <code>x</code> can be converted to type <code>T</code>
@@ -6221,6 +6251,32 @@ if v == nil {
 		printString("don't know the type")
 	}
 }
+</pre>
+
+<p>
+A <a href="#Type_parameters">type parameter</a> or a <a href="#Type_declarations">parameterized type</a>
+may be used as a type in a case. If upon <a href="#Instantiations">instantiation</a> that type turns
+out to duplicate another entry in the switch, the first matching case is chosen.
+</p>
+
+<pre>
+func f[P any](x any) int {
+	switch x.(type) {
+	case P:
+		return 0
+	case string:
+		return 1
+	case []P:
+		return 2
+	case []byte:
+		return 3
+	default:
+		return 4
+	}
+}
+
+var v1 = f[string]("foo")   // v1 == 0
+var v2 = f[byte]([]byte{})  // v2 == 2
 </pre>
 
 <p>
