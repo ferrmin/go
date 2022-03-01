@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package a
 
-import (
-	"a"
-	"fmt"
-)
+type A[T any] struct{}
 
-func main() {
-	var x a.I[a.JsonRaw]
+func (_ A[T]) Method() {}
 
-	fmt.Printf("%v\n", x)
+func DoSomething[P any]() {
+	a := A[*byte]{}
+	a.Method()
 }

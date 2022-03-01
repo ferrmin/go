@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package p
 
-import (
-	"a"
-	"fmt"
-)
+type myString string
 
-func main() {
-	var x a.I[a.JsonRaw]
+func _[P ~string | ~[]byte | ~[]rune]() {
+	_ = P("")
+	const s myString = ""
+	_ = P(s)
+}
 
-	fmt.Printf("%v\n", x)
+func _[P myString]() {
+	_ = P("")
 }

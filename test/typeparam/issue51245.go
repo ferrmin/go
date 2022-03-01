@@ -1,16 +1,16 @@
+// build -gcflags=-G=3
+
 // Copyright 2022 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package main
 
-import (
-	"a"
-	"fmt"
-)
+type T[P any] int
+const C T[int] = 3
+
+type T2 int
+const C2 T2 = 9
 
 func main() {
-	var x a.I[a.JsonRaw]
-
-	fmt.Printf("%v\n", x)
 }
