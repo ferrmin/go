@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//
+// WARNING: this file is built by the bootstrap compiler, thus
+// it must maintain compatibility with the oldest supported
+// bootstrap toolchain.
+//
+
 //go:build ppc64 || ppc64le
 // +build ppc64 ppc64le
 
@@ -311,14 +317,14 @@ loop:
 	ADD	$16, INP
 
 	// Offload to VSR24-31 (aka FPR24-31)
-	XXLOR	V0, V0, VS24
-	XXLOR	V1, V1, VS25
-	XXLOR	V2, V2, VS26
-	XXLOR	V3, V3, VS27
-	XXLOR	V4, V4, VS28
-	XXLOR	V5, V5, VS29
-	XXLOR	V6, V6, VS30
-	XXLOR	V7, V7, VS31
+	XXLORQ	VS32, VS32, VS24
+	XXLORQ	VS33, VS33, VS25
+	XXLORQ	VS34, VS34, VS26
+	XXLORQ	VS35, VS35, VS27
+	XXLORQ	VS36, VS36, VS28
+	XXLORQ	VS37, VS37, VS29
+	XXLORQ	VS38, VS38, VS30
+	XXLORQ	VS39, VS39, VS31
 
 	VADDUWM	KI, V7, V7	// h+K[i]
 	LVX	(TBL)(IDX), KI
@@ -386,21 +392,21 @@ L16_xx:
 
 	BC	0x10, 0, L16_xx		// bdnz
 
-	XXLOR	VS24, VS24, V10
+	XXLORQ	VS24, VS24, VS42
 
-	XXLOR	VS25, VS25, V11
+	XXLORQ	VS25, VS25, VS43
 	VADDUWM	V10, V0, V0
-	XXLOR	VS26, VS26, V12
+	XXLORQ	VS26, VS26, VS44
 	VADDUWM	V11, V1, V1
-	XXLOR	VS27, VS27, V13
+	XXLORQ	VS27, VS27, VS45
 	VADDUWM	V12, V2, V2
-	XXLOR	VS28, VS28, V14
+	XXLORQ	VS28, VS28, VS46
 	VADDUWM	V13, V3, V3
-	XXLOR	VS29, VS29, V15
+	XXLORQ	VS29, VS29, VS47
 	VADDUWM	V14, V4, V4
-	XXLOR	VS30, VS30, V16
+	XXLORQ	VS30, VS30, VS48
 	VADDUWM	V15, V5, V5
-	XXLOR	VS31, VS31, V17
+	XXLORQ	VS31, VS31, VS49
 	VADDUWM	V16, V6, V6
 	VADDUWM	V17, V7, V7
 
