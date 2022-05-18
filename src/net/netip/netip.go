@@ -63,8 +63,8 @@ type Addr struct {
 	z *intern.Value
 }
 
-// z0, z4, and z6noz are sentinel IP.z values.
-// See the IP type's field docs.
+// z0, z4, and z6noz are sentinel Addr.z values.
+// See the Addr type's field docs.
 var (
 	z0    = (*intern.Value)(nil)
 	z4    = new(intern.Value)
@@ -474,7 +474,7 @@ func (ip Addr) Is6() bool {
 
 // Unmap returns ip with any IPv4-mapped IPv6 address prefix removed.
 //
-// That is, if ip is an IPv6 address wrapping an IPv4 adddress, it
+// That is, if ip is an IPv6 address wrapping an IPv4 address, it
 // returns the wrapped IPv4 address. Otherwise it returns ip unmodified.
 func (ip Addr) Unmap() Addr {
 	if ip.Is4In6() {
