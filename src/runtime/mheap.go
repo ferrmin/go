@@ -221,22 +221,9 @@ var mheap_ mheap
 //go:notinheap
 type heapArena struct {
 	// bitmap stores the pointer/scalar bitmap for the words in
-	// this arena. See mbitmap.go for a description.
-	// This array uses 1 bit per word of heap, or 1.6% of the heap size (for 64-bit).
-	bitmap [heapArenaBitmapWords]uintptr
-
-	// If the ith bit of noMorePtrs is true, then there are no more
-	// pointers for the object containing the word described by the
-	// high bit of bitmap[i].
-	// In that case, bitmap[i+1], ... must be zero until the start
-	// of the next object.
-	// We never operate on these entries using bit-parallel techniques,
-	// so it is ok if they are small. Also, they can't be bigger than
-	// uint16 because at that size a single noMorePtrs entry
-	// represents 8K of memory, the minimum size of a span. Any larger
-	// and we'd have to worry about concurrent updates.
-	// This array uses 1 bit per word of bitmap, or .024% of the heap size (for 64-bit).
-	noMorePtrs [heapArenaBitmapWords / 8]uint8
+	// this arena. See mbitmap.go for a description. Use the
+	// heapBits type to access this.
+	bitmap [heapArenaBitmapBytes]byte
 
 	// spans maps from virtual address page ID within this arena to *mspan.
 	// For allocated spans, their pages map to the span itself.
@@ -1875,12 +1862,14 @@ func addfinalizer(p unsafe.Pointer, f *funcval, nret uintptr, fint *_type, ot *p
 		// situation where it's possible that markrootSpans
 		// has already run but mark termination hasn't yet.
 		if gcphase != _GCoff {
-			base, _, _ := findObject(uintptr(p), 0, 0)
+			base, span, _ := findObject(uintptr(p), 0, 0)
 			mp := acquirem()
 			gcw := &mp.p.ptr().gcw
 			// Mark everything reachable from the object
 			// so it's retained for the finalizer.
-			scanobject(base, gcw)
+			if !span.spanclass.noscan() {
+				scanobject(base, gcw)
+			}
 			// Mark the finalizer itself, since the
 			// special isn't part of the GC'd heap.
 			scanblock(uintptr(unsafe.Pointer(&s.fn)), goarch.PtrSize, &oneptrmask[0], gcw, nil)
