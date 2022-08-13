@@ -546,6 +546,7 @@ type m struct {
 	newSigstack   bool // minit on C thread called sigaltstack
 	printlock     int8
 	incgo         bool   // m is executing a cgo call
+	isextra       bool   // m is an extra m
 	freeWait      uint32 // if == 0, safe to free g0 and delete m (atomic)
 	fastrand      uint64
 	needextram    bool
@@ -779,7 +780,7 @@ type schedt struct {
 
 	pidle        puintptr // idle p's
 	npidle       atomic.Int32
-	nmspinning   atomic.Int32 // See "Worker thread parking/unparking" comment in proc.go.
+	nmspinning   atomic.Int32  // See "Worker thread parking/unparking" comment in proc.go.
 	needspinning atomic.Uint32 // See "Delicate dance" comment in proc.go. Boolean. Must hold sched.lock to set to 1.
 
 	// Global runnable queue.
