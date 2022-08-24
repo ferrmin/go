@@ -434,6 +434,9 @@ const (
 	Op386SARLconst
 	Op386SARWconst
 	Op386SARBconst
+	Op386ROLL
+	Op386ROLW
+	Op386ROLB
 	Op386ROLLconst
 	Op386ROLWconst
 	Op386ROLBconst
@@ -1553,6 +1556,7 @@ const (
 	OpARM64MOVWload
 	OpARM64MOVWUload
 	OpARM64MOVDload
+	OpARM64LDP
 	OpARM64FMOVSload
 	OpARM64FMOVDload
 	OpARM64MOVDloadidx
@@ -2962,10 +2966,10 @@ const (
 	OpPopCount16
 	OpPopCount32
 	OpPopCount64
-	OpRotateLeft8
-	OpRotateLeft16
-	OpRotateLeft32
 	OpRotateLeft64
+	OpRotateLeft32
+	OpRotateLeft16
+	OpRotateLeft8
 	OpSqrt
 	OpSqrt32
 	OpFloor
@@ -4628,6 +4632,54 @@ var opcodeTable = [...]opInfo{
 		asm:          x86.ASARB,
 		reg: regInfo{
 			inputs: []inputInfo{
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+			outputs: []outputInfo{
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+		},
+	},
+	{
+		name:         "ROLL",
+		argLen:       2,
+		resultInArg0: true,
+		clobberFlags: true,
+		asm:          x86.AROLL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 2},   // CX
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+			outputs: []outputInfo{
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+		},
+	},
+	{
+		name:         "ROLW",
+		argLen:       2,
+		resultInArg0: true,
+		clobberFlags: true,
+		asm:          x86.AROLW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 2},   // CX
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+			outputs: []outputInfo{
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+		},
+	},
+	{
+		name:         "ROLB",
+		argLen:       2,
+		resultInArg0: true,
+		clobberFlags: true,
+		asm:          x86.AROLB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 2},   // CX
 				{0, 239}, // AX CX DX BX BP SI DI
 			},
 			outputs: []outputInfo{
@@ -20796,6 +20848,23 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:           "LDP",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		asm:            arm64.ALDP,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{1, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+			},
+		},
+	},
+	{
 		name:           "FMOVSload",
 		auxType:        auxSymOff,
 		argLen:         2,
@@ -22238,7 +22307,7 @@ var opcodeTable = [...]opInfo{
 				{1, 65536},     // R16
 				{2, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
 			},
-			clobbers: 196608, // R16 R17
+			clobbers: 33751040, // R16 R17 R25
 		},
 	},
 	{
@@ -38439,12 +38508,7 @@ var opcodeTable = [...]opInfo{
 		generic: true,
 	},
 	{
-		name:    "RotateLeft8",
-		argLen:  2,
-		generic: true,
-	},
-	{
-		name:    "RotateLeft16",
+		name:    "RotateLeft64",
 		argLen:  2,
 		generic: true,
 	},
@@ -38454,7 +38518,12 @@ var opcodeTable = [...]opInfo{
 		generic: true,
 	},
 	{
-		name:    "RotateLeft64",
+		name:    "RotateLeft16",
+		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "RotateLeft8",
 		argLen:  2,
 		generic: true,
 	},
