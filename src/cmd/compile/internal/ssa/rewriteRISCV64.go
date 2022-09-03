@@ -5495,6 +5495,7 @@ func rewriteValueRISCV64_OpRISCV64SRLI(v *Value) bool {
 func rewriteValueRISCV64_OpRISCV64SUB(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
 	// match: (SUB x (MOVDconst [val]))
 	// cond: is32Bit(-val)
 	// result: (ADDI [-val] x)
@@ -5510,6 +5511,26 @@ func rewriteValueRISCV64_OpRISCV64SUB(v *Value) bool {
 		v.reset(OpRISCV64ADDI)
 		v.AuxInt = int64ToAuxInt(-val)
 		v.AddArg(x)
+		return true
+	}
+	// match: (SUB <t> (MOVDconst [val]) y)
+	// cond: is32Bit(-val)
+	// result: (NEG (ADDI <t> [-val] y))
+	for {
+		t := v.Type
+		if v_0.Op != OpRISCV64MOVDconst {
+			break
+		}
+		val := auxIntToInt64(v_0.AuxInt)
+		y := v_1
+		if !(is32Bit(-val)) {
+			break
+		}
+		v.reset(OpRISCV64NEG)
+		v0 := b.NewValue0(v.Pos, OpRISCV64ADDI, t)
+		v0.AuxInt = int64ToAuxInt(-val)
+		v0.AddArg(y)
+		v.AddArg(v0)
 		return true
 	}
 	// match: (SUB x (MOVDconst [0]))
@@ -7847,6 +7868,40 @@ func rewriteBlockRISCV64(b *Block) bool {
 			b.resetWithControl(BlockRISCV64BEQZ, x)
 			return true
 		}
+		// match: (BEQZ (FNES <t> x y) yes no)
+		// result: (BNEZ (FEQS <t> x y) yes no)
+		for b.Controls[0].Op == OpRISCV64FNES {
+			v_0 := b.Controls[0]
+			t := v_0.Type
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+				x := v_0_0
+				y := v_0_1
+				v0 := b.NewValue0(v_0.Pos, OpRISCV64FEQS, t)
+				v0.AddArg2(x, y)
+				b.resetWithControl(BlockRISCV64BNEZ, v0)
+				return true
+			}
+		}
+		// match: (BEQZ (FNED <t> x y) yes no)
+		// result: (BNEZ (FEQD <t> x y) yes no)
+		for b.Controls[0].Op == OpRISCV64FNED {
+			v_0 := b.Controls[0]
+			t := v_0.Type
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+				x := v_0_0
+				y := v_0_1
+				v0 := b.NewValue0(v_0.Pos, OpRISCV64FEQD, t)
+				v0.AddArg2(x, y)
+				b.resetWithControl(BlockRISCV64BNEZ, v0)
+				return true
+			}
+		}
 		// match: (BEQZ (SUB x y) yes no)
 		// result: (BEQ x y yes no)
 		for b.Controls[0].Op == OpRISCV64SUB {
@@ -7967,6 +8022,40 @@ func rewriteBlockRISCV64(b *Block) bool {
 			x := v_0.Args[0]
 			b.resetWithControl(BlockRISCV64BNEZ, x)
 			return true
+		}
+		// match: (BNEZ (FNES <t> x y) yes no)
+		// result: (BEQZ (FEQS <t> x y) yes no)
+		for b.Controls[0].Op == OpRISCV64FNES {
+			v_0 := b.Controls[0]
+			t := v_0.Type
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+				x := v_0_0
+				y := v_0_1
+				v0 := b.NewValue0(v_0.Pos, OpRISCV64FEQS, t)
+				v0.AddArg2(x, y)
+				b.resetWithControl(BlockRISCV64BEQZ, v0)
+				return true
+			}
+		}
+		// match: (BNEZ (FNED <t> x y) yes no)
+		// result: (BEQZ (FEQD <t> x y) yes no)
+		for b.Controls[0].Op == OpRISCV64FNED {
+			v_0 := b.Controls[0]
+			t := v_0.Type
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+				x := v_0_0
+				y := v_0_1
+				v0 := b.NewValue0(v_0.Pos, OpRISCV64FEQD, t)
+				v0.AddArg2(x, y)
+				b.resetWithControl(BlockRISCV64BEQZ, v0)
+				return true
+			}
 		}
 		// match: (BNEZ (SUB x y) yes no)
 		// result: (BNE x y yes no)

@@ -620,6 +620,12 @@
 (BEQZ (NEG x) yes no) => (BEQZ x yes no)
 (BNEZ (NEG x) yes no) => (BNEZ x yes no)
 
+// Negate comparision with FNES/FNED.
+(BEQZ (FNES <t> x y) yes no) => (BNEZ (FEQS <t> x y) yes no)
+(BNEZ (FNES <t> x y) yes no) => (BEQZ (FEQS <t> x y) yes no)
+(BEQZ (FNED <t> x y) yes no) => (BNEZ (FEQD <t> x y) yes no)
+(BNEZ (FNED <t> x y) yes no) => (BEQZ (FEQD <t> x y) yes no)
+
 // Convert BEQZ/BNEZ into more optimal branch conditions.
 (BEQZ (SUB x y) yes no) => (BEQ x y yes no)
 (BNEZ (SUB x y) yes no) => (BNE x y yes no)
@@ -742,8 +748,9 @@
 (SRL x (MOVDconst [val])) => (SRLI [int64(val&63)] x)
 (SRA x (MOVDconst [val])) => (SRAI [int64(val&63)] x)
 
-// Convert subtraction of a const into ADDI with negative immediate, where possible.
+// Convert const subtraction into ADDI with negative immediate, where possible.
 (SUB x (MOVDconst [val])) && is32Bit(-val) => (ADDI [-val] x)
+(SUB <t> (MOVDconst [val]) y) && is32Bit(-val) => (NEG (ADDI <t> [-val] y))
 
 // Subtraction of zero.
 (SUB  x (MOVDconst [0])) => x
