@@ -162,11 +162,7 @@ func (t *tester) run() {
 			// Instead, we can just check that it is not stale, which may be less
 			// expensive (and is also more likely to catch bugs in the builder
 			// implementation).
-			willTest := []string{"std"}
-			if t.shouldTestCmd() {
-				willTest = append(willTest, "cmd")
-			}
-			checkNotStale("go", willTest...)
+			checkNotStale("go", "std", "cmd")
 		}
 	}
 
@@ -490,10 +486,7 @@ func (t *tester) registerTests() {
 		if t.race {
 			cmd.Args = append(cmd.Args, "-tags=race")
 		}
-		cmd.Args = append(cmd.Args, "std")
-		if t.shouldTestCmd() {
-			cmd.Args = append(cmd.Args, "cmd")
-		}
+		cmd.Args = append(cmd.Args, "std", "cmd")
 		cmd.Stderr = new(bytes.Buffer)
 		all, err := cmd.Output()
 		if err != nil {
@@ -1044,7 +1037,7 @@ func (t *tester) extLink() bool {
 		"android-arm", "android-arm64",
 		"darwin-amd64", "darwin-arm64",
 		"dragonfly-amd64",
-		"freebsd-386", "freebsd-amd64", "freebsd-arm",
+		"freebsd-386", "freebsd-amd64", "freebsd-arm", "freebsd-riscv64",
 		"linux-386", "linux-amd64", "linux-arm", "linux-arm64", "linux-loong64", "linux-ppc64le", "linux-mips64", "linux-mips64le", "linux-mips", "linux-mipsle", "linux-riscv64", "linux-s390x",
 		"netbsd-386", "netbsd-amd64",
 		"openbsd-386", "openbsd-amd64",
@@ -1232,7 +1225,7 @@ func (t *tester) cgoTest(dt *distTest) error {
 	case "aix-ppc64",
 		"android-arm", "android-arm64",
 		"dragonfly-amd64",
-		"freebsd-386", "freebsd-amd64", "freebsd-arm",
+		"freebsd-386", "freebsd-amd64", "freebsd-arm", "freebsd-riscv64",
 		"linux-386", "linux-amd64", "linux-arm", "linux-arm64", "linux-ppc64le", "linux-riscv64", "linux-s390x",
 		"netbsd-386", "netbsd-amd64",
 		"openbsd-386", "openbsd-amd64", "openbsd-arm", "openbsd-arm64", "openbsd-mips64":
@@ -1680,14 +1673,6 @@ func (t *tester) shouldUsePrecompiledStdTest() bool {
 	}
 	_, err := os.Stat(bin)
 	return err == nil
-}
-
-func (t *tester) shouldTestCmd() bool {
-	if goos == "js" && goarch == "wasm" {
-		// Issues 25911, 35220
-		return false
-	}
-	return true
 }
 
 // prebuiltGoPackageTestBinary returns the path where we'd expect
