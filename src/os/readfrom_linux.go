@@ -16,6 +16,15 @@ var (
 )
 
 func (f *File) readFrom(r io.Reader) (written int64, handled bool, err error) {
+	// Neither copy_file_range(2) nor splice(2) supports destinations opened with
+	// O_APPEND, so don't bother to try zero-copy with these system calls.
+	//
+	// Visit https://man7.org/linux/man-pages/man2/copy_file_range.2.html#ERRORS and
+	// https://man7.org/linux/man-pages/man2/splice.2.html#ERRORS for details.
+	if f.appendMode {
+		return 0, false, nil
+	}
+
 	written, handled, err = f.copyFileRange(r)
 	if handled {
 		return
@@ -51,7 +60,7 @@ func (f *File) spliceToFile(r io.Reader) (written int64, handled bool, err error
 		lr.N = remain - written
 	}
 
-	return written, handled, NewSyscallError(syscallName, err)
+	return written, handled, wrapSyscallError(syscallName, err)
 }
 
 // getPollFD tries to get the poll.FD from the given io.Reader by expecting
@@ -74,12 +83,6 @@ func getPollFD(r io.Reader) *poll.FD {
 }
 
 func (f *File) copyFileRange(r io.Reader) (written int64, handled bool, err error) {
-	// copy_file_range(2) does not support destinations opened with
-	// O_APPEND, so don't even try.
-	if f.appendMode {
-		return 0, false, nil
-	}
-
 	var (
 		remain int64
 		lr     *io.LimitedReader
@@ -102,7 +105,7 @@ func (f *File) copyFileRange(r io.Reader) (written int64, handled bool, err erro
 	if lr != nil {
 		lr.N -= written
 	}
-	return written, handled, NewSyscallError("copy_file_range", err)
+	return written, handled, wrapSyscallError("copy_file_range", err)
 }
 
 // tryLimitedReader tries to assert the io.Reader to io.LimitedReader, it returns the io.LimitedReader,
