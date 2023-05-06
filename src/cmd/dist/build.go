@@ -626,13 +626,15 @@ var deptab = []struct {
 }{
 	{"cmd/go/internal/cfg", []string{
 		"zdefaultcc.go",
+	}},
+	{"go/build", []string{
+		"zcgo.go",
+	}},
+	{"internal/platform", []string{
 		"zosarch.go",
 	}},
 	{"runtime/internal/sys", []string{
 		"zversion.go",
-	}},
-	{"go/build", []string{
-		"zcgo.go",
 	}},
 	{"time/tzdata", []string{
 		"zzipdata.go",
@@ -650,10 +652,10 @@ var gentab = []struct {
 	nameprefix string
 	gen        func(string, string)
 }{
+	{"zcgo.go", mkzcgo},
 	{"zdefaultcc.go", mkzdefaultcc},
 	{"zosarch.go", mkzosarch},
 	{"zversion.go", mkzversion},
-	{"zcgo.go", mkzcgo},
 	{"zzipdata.go", mktzdata},
 
 	// not generated anymore, but delete the file if we see it
@@ -1196,6 +1198,7 @@ var cleanlist = []string{
 	"runtime/internal/sys",
 	"cmd/cgo",
 	"cmd/go/internal/cfg",
+	"internal/platform",
 	"go/build",
 }
 
@@ -1252,7 +1255,7 @@ func cmdenv() {
 	windows := flag.Bool("w", gohostos == "windows", "emit windows syntax")
 	xflagparse(0)
 
-	format := "%s=\"%s\"\n"
+	format := "%s=\"%s\";\n" // Include ; to separate variables when 'dist env' output is used with eval.
 	switch {
 	case *plan9:
 		format = "%s='%s'\n"
@@ -1299,6 +1302,17 @@ func cmdenv() {
 			sep = ";"
 		}
 		xprintf(format, "PATH", fmt.Sprintf("%s%s%s", gorootBin, sep, os.Getenv("PATH")))
+
+		// Also include $DIST_UNMODIFIED_PATH with the original $PATH
+		// for the internal needs of "dist banner", along with export
+		// so that it reaches the dist process. See its comment below.
+		var exportFormat string
+		if !*windows && !*plan9 {
+			exportFormat = "export " + format
+		} else {
+			exportFormat = format
+		}
+		xprintf(exportFormat, "DIST_UNMODIFIED_PATH", os.Getenv("PATH"))
 	}
 }
 
@@ -1647,7 +1661,7 @@ func wrapperPathFor(goos, goarch string) string {
 	switch {
 	case goos == "android":
 		if gohostos != "android" {
-			return pathf("%s/misc/android/go_android_exec.go", goroot)
+			return pathf("%s/misc/go_android_exec/main.go", goroot)
 		}
 	case goos == "ios":
 		if gohostos != "ios" {
@@ -1897,7 +1911,15 @@ func banner() {
 		if gohostos == "windows" {
 			pathsep = ";"
 		}
-		if !strings.Contains(pathsep+os.Getenv("PATH")+pathsep, pathsep+gorootBin+pathsep) {
+		path := os.Getenv("PATH")
+		if p, ok := os.LookupEnv("DIST_UNMODIFIED_PATH"); ok {
+			// Scripts that modify $PATH and then run dist should also provide
+			// dist with an unmodified copy of $PATH via $DIST_UNMODIFIED_PATH.
+			// Use it here when determining if the user still needs to update
+			// their $PATH. See go.dev/issue/42563.
+			path = p
+		}
+		if !strings.Contains(pathsep+path+pathsep, pathsep+gorootBin+pathsep) {
 			xprintf("*** You need to add %s to your PATH.\n", gorootBin)
 		}
 	}

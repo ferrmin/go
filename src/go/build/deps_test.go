@@ -292,7 +292,7 @@ var depsRules = `
 	FMT, internal/goexperiment
 	< internal/buildcfg;
 
-	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion
+	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion, internal/platform
 	< go/build;
 
 	# databases
@@ -561,6 +561,9 @@ var depsRules = `
 	log
 	< testing/iotest
 	< testing/fstest;
+
+	log/slog
+	< testing/slogtest;
 
 	FMT, flag, math/rand
 	< testing/quick;

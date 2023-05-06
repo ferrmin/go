@@ -45,20 +45,21 @@ import (
 	"strings"
 )
 
-// The build configuration supports PC-relative instructions and relocations.
-var hasPCrel = buildcfg.GOPPC64 >= 10 && buildcfg.GOOS == "linux" && buildcfg.GOARCH == "ppc64le"
+// The build configuration supports PC-relative instructions and relocations (limited to tested targets).
+var hasPCrel = buildcfg.GOPPC64 >= 10 && buildcfg.GOOS == "linux"
 
-func genpltstub(ctxt *ld.Link, ldr *loader.Loader, r loader.Reloc, s loader.Sym) (sym loader.Sym, firstUse bool) {
+func genpltstub(ctxt *ld.Link, ldr *loader.Loader, r loader.Reloc, ri int, s loader.Sym) (sym loader.Sym, firstUse bool) {
 	// The ppc64 ABI PLT has similar concepts to other
 	// architectures, but is laid out quite differently. When we
-	// see an R_PPC64_REL24 relocation to a dynamic symbol
-	// (indicating that the call needs to go through the PLT), we
-	// generate up to three stubs and reserve a PLT slot.
+	// see a relocation to a dynamic symbol (indicating that the
+	// call needs to go through the PLT), we generate up to three
+	// stubs and reserve a PLT slot.
 	//
-	// 1) The call site will be bl x; nop (where the relocation
-	//    applies to the bl).  We rewrite this to bl x_stub; ld
-	//    r2,24(r1).  The ld is necessary because x_stub will save
-	//    r2 (the TOC pointer) at 24(r1) (the "TOC save slot").
+	// 1) The call site is a "bl x" where genpltstub rewrites it to
+	//    "bl x_stub". Depending on the properties of the caller
+	//    (see ELFv2 1.5 4.2.5.3), a nop may be expected immediately
+	//    after the bl. This nop is rewritten to ld r2,24(r1) to
+	//    restore the toc pointer saved by x_stub.
 	//
 	// 2) We reserve space for a pointer in the .plt section (once
 	//    per referenced dynamic function).  .plt is a data
@@ -67,11 +68,8 @@ func genpltstub(ctxt *ld.Link, ldr *loader.Loader, r loader.Reloc, s loader.Sym)
 	//    dynamic linker will fill each slot with a pointer to the
 	//    corresponding x@plt entry point.
 	//
-	// 3) We generate the "call stub" x_stub (once per dynamic
-	//    function/object file pair).  This saves the TOC in the
-	//    TOC save slot, reads the function pointer from x's .plt
-	//    slot and calls it like any other global entry point
-	//    (including setting r12 to the function address).
+	// 3) We generate a "call stub" x_stub based on the properties
+	//    of the caller.
 	//
 	// 4) We generate the "symbol resolver stub" x@plt (once per
 	//    dynamic function).  This is solely a branch to the glink
@@ -90,49 +88,65 @@ func genpltstub(ctxt *ld.Link, ldr *loader.Loader, r loader.Reloc, s loader.Sym)
 	// platforms and ppc64's .glink is like .plt on other
 	// platforms.
 
-	// Find all R_PPC64_REL24 relocations that reference dynamic
-	// imports. Reserve PLT entries for these symbols and
-	// generate call stubs. The call stubs need to live in .text,
-	// which is why we need to do this pass this early.
-	//
-	// This assumes "case 1" from the ABI, where the caller needs
-	// us to save and restore the TOC pointer.
+	// Find all relocations that reference dynamic imports.
+	// Reserve PLT entries for these symbols and generate call
+	// stubs. The call stubs need to live in .text, which is why we
+	// need to do this pass this early.
 
-	// Reserve PLT entry and generate symbol
-	// resolver
+	// Reserve PLT entry and generate symbol resolver
 	addpltsym(ctxt, ldr, r.Sym())
 
-	// Generate call stub. Important to note that we're looking
-	// up the stub using the same version as the parent symbol (s),
-	// needed so that symtoc() will select the right .TOC. symbol
-	// when processing the stub.  In older versions of the linker
-	// this was done by setting stub.Outer to the parent, but
-	// if the stub has the right version initially this is not needed.
-	n := fmt.Sprintf("%s.%s", ldr.SymName(s), ldr.SymName(r.Sym()))
-	stub := ldr.CreateSymForUpdate(n, ldr.SymVersion(s))
+	// The stub types are described in gencallstub.
+	stubType := 0
+	stubTypeStr := ""
+
+	// For now, the choice of call stub type is determined by whether
+	// the caller maintains a TOC pointer in R2. A TOC pointer implies
+	// we can always generate a position independent stub.
+	//
+	// For dynamic calls made from an external object, it is safe to
+	// assume a TOC pointer is maintained. These were imported from
+	// a R_PPC64_REL24 relocation.
+	//
+	// For dynamic calls made from a Go object, the shared attribute
+	// indicates a PIC symbol, which requires a TOC pointer be
+	// maintained. Otherwise, a simpler non-PIC stub suffices.
+	if ldr.AttrExternal(s) || ldr.AttrShared(s) {
+		stubTypeStr = "_tocrel"
+		stubType = 1
+	} else {
+		stubTypeStr = "_nopic"
+		stubType = 3
+	}
+	n := fmt.Sprintf("_pltstub%s.%s", stubTypeStr, ldr.SymName(r.Sym()))
+
+	// When internal linking, all text symbols share the same toc pointer.
+	stub := ldr.CreateSymForUpdate(n, 0)
 	firstUse = stub.Size() == 0
 	if firstUse {
-		gencallstub(ctxt, ldr, 1, stub, r.Sym())
+		gencallstub(ctxt, ldr, stubType, stub, r.Sym())
 	}
 
 	// Update the relocation to use the call stub
-	r.SetSym(stub.Sym())
-
-	// Make the symbol writeable so we can fixup toc.
 	su := ldr.MakeSymbolUpdater(s)
-	su.MakeWritable()
-	p := su.Data()
+	su.SetRelocSym(ri, stub.Sym())
 
-	// Check for toc restore slot (a nop), and replace with toc restore.
-	var nop uint32
-	if len(p) >= int(r.Off()+8) {
-		nop = ctxt.Arch.ByteOrder.Uint32(p[r.Off()+4:])
+	// A type 1 call must restore the toc pointer after the call.
+	if stubType == 1 {
+		su.MakeWritable()
+		p := su.Data()
+
+		// Check for a toc pointer restore slot (a nop), and rewrite to restore the toc pointer.
+		var nop uint32
+		if len(p) >= int(r.Off()+8) {
+			nop = ctxt.Arch.ByteOrder.Uint32(p[r.Off()+4:])
+		}
+		if nop != 0x60000000 {
+			ldr.Errorf(s, "Symbol %s is missing toc restoration slot at offset %d", ldr.SymName(s), r.Off()+4)
+		}
+		const o1 = 0xe8410018 // ld r2,24(r1)
+		ctxt.Arch.ByteOrder.PutUint32(p[r.Off()+4:], o1)
 	}
-	if nop != 0x60000000 {
-		ldr.Errorf(s, "Symbol %s is missing toc restoration slot at offset %d", ldr.SymName(s), r.Off()+4)
-	}
-	const o1 = 0xe8410018 // ld r2,24(r1)
-	ctxt.Arch.ByteOrder.PutUint32(p[r.Off()+4:], o1)
 
 	return stub.Sym(), firstUse
 }
@@ -150,7 +164,7 @@ func genstubs(ctxt *ld.Link, ldr *loader.Loader) {
 				switch ldr.SymType(r.Sym()) {
 				case sym.SDYNIMPORT:
 					// This call goes through the PLT, generate and call through a PLT stub.
-					if sym, firstUse := genpltstub(ctxt, ldr, r, s); firstUse {
+					if sym, firstUse := genpltstub(ctxt, ldr, r, i, s); firstUse {
 						stubs = append(stubs, sym)
 					}
 
@@ -189,7 +203,11 @@ func genstubs(ctxt *ld.Link, ldr *loader.Loader) {
 
 					// Turn this reloc into an R_CALLPOWER, and convert the TOC restore into a nop.
 					su.SetRelocType(i, objabi.R_CALLPOWER)
-					su.SetRelocAdd(i, r.Add()+int64(ldr.SymLocalentry(r.Sym())))
+					localEoffset := int64(ldr.SymLocalentry(r.Sym()))
+					if localEoffset == 1 {
+						ldr.Errorf(s, "Unsupported NOTOC call to %s", ldr.SymName(r.Sym()))
+					}
+					su.SetRelocAdd(i, r.Add()+localEoffset)
 					r.SetSiz(4)
 					rewritetonop(&ctxt.Target, ldr, su, int64(r.Off()+4), 0xFFFFFFFF, OP_TOCRESTORE)
 				}
@@ -219,20 +237,23 @@ func genaddmoduledata(ctxt *ld.Link, ldr *loader.Loader) {
 		initfunc.AddUint32(ctxt.Arch, op)
 	}
 
-	// addis r2, r12, .TOC.-func@ha
-	toc := ctxt.DotTOC[0]
-	rel1, _ := initfunc.AddRel(objabi.R_ADDRPOWER_PCREL)
-	rel1.SetOff(0)
-	rel1.SetSiz(8)
-	rel1.SetSym(toc)
-	o(0x3c4c0000)
-	// addi r2, r2, .TOC.-func@l
-	o(0x38420000)
-	// mflr r31
-	o(0x7c0802a6)
-	// stdu r31, -32(r1)
-	o(0xf801ffe1)
-	// addis r3, r2, local.moduledata@got@ha
+	// Write a function to load this module's local.moduledata. This is shared code.
+	//
+	// package link
+	// void addmoduledata() {
+	//	runtime.addmoduledata(local.moduledata)
+	// }
+
+	// Regenerate TOC from R12 (the address of this function).
+	sz := initfunc.AddSymRef(ctxt.Arch, ctxt.DotTOC[0], 0, objabi.R_ADDRPOWER_PCREL, 8)
+	initfunc.SetUint32(ctxt.Arch, sz-8, 0x3c4c0000) // addis r2, r12, .TOC.-func@ha
+	initfunc.SetUint32(ctxt.Arch, sz-4, 0x38420000) // addi r2, r2, .TOC.-func@l
+
+	// This is Go ABI. Stack a frame and save LR.
+	o(0x7c0802a6) // mflr r31
+	o(0xf801ffe1) // stdu r31, -32(r1)
+
+	// Get the moduledata pointer from GOT and put into R3.
 	var tgt loader.Sym
 	if s := ldr.Lookup("local.moduledata", 0); s != 0 {
 		tgt = s
@@ -241,29 +262,29 @@ func genaddmoduledata(ctxt *ld.Link, ldr *loader.Loader) {
 	} else {
 		tgt = ldr.LookupOrCreateSym("runtime.firstmoduledata", 0)
 	}
-	rel2, _ := initfunc.AddRel(objabi.R_ADDRPOWER_GOT)
-	rel2.SetOff(int32(initfunc.Size()))
-	rel2.SetSiz(8)
-	rel2.SetSym(tgt)
-	o(0x3c620000)
-	// ld r3, local.moduledata@got@l(r3)
-	o(0xe8630000)
-	// bl runtime.addmoduledata
-	rel3, _ := initfunc.AddRel(objabi.R_CALLPOWER)
-	rel3.SetOff(int32(initfunc.Size()))
-	rel3.SetSiz(4)
-	rel3.SetSym(addmoduledata)
-	o(0x48000001)
-	// nop
-	o(0x60000000)
-	// ld r31, 0(r1)
-	o(0xe8010000)
-	// mtlr r31
-	o(0x7c0803a6)
-	// addi r1,r1,32
-	o(0x38210020)
-	// blr
-	o(0x4e800020)
+
+	if !hasPCrel {
+		sz = initfunc.AddSymRef(ctxt.Arch, tgt, 0, objabi.R_ADDRPOWER_GOT, 8)
+		initfunc.SetUint32(ctxt.Arch, sz-8, 0x3c620000) // addis r3, r2, local.moduledata@got@ha
+		initfunc.SetUint32(ctxt.Arch, sz-4, 0xe8630000) // ld r3, local.moduledata@got@l(r3)
+	} else {
+		sz = initfunc.AddSymRef(ctxt.Arch, tgt, 0, objabi.R_ADDRPOWER_GOT_PCREL34, 8)
+		// Note, this is prefixed instruction. It must not cross a 64B boundary.
+		// It is doubleworld aligned here, so it will never cross (this function is 16B aligned, minimum).
+		initfunc.SetUint32(ctxt.Arch, sz-8, 0x04100000)
+		initfunc.SetUint32(ctxt.Arch, sz-4, 0xe4600000) // pld r3, local.moduledata@got@pcrel
+	}
+
+	// Call runtime.addmoduledata
+	sz = initfunc.AddSymRef(ctxt.Arch, addmoduledata, 0, objabi.R_CALLPOWER, 4)
+	initfunc.SetUint32(ctxt.Arch, sz-4, 0x48000001) // bl runtime.addmoduledata
+	o(0x60000000)                                   // nop (for TOC restore)
+
+	// Pop stack frame and return.
+	o(0xe8010000) // ld r31, 0(r1)
+	o(0x7c0803a6) // mtlr r31
+	o(0x38210020) // addi r1,r1,32
+	o(0x4e800020) // blr
 }
 
 // Rewrite ELF (v1 or v2) calls to _savegpr0_n, _savegpr1_n, _savefpr_n, _restfpr_n, _savevr_m, or
@@ -337,44 +358,38 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	}
 }
 
-// Construct a call stub in stub that calls symbol targ via its PLT
-// entry.
-func gencallstub(ctxt *ld.Link, ldr *loader.Loader, abicase int, stub *loader.SymbolBuilder, targ loader.Sym) {
-	if abicase != 1 {
-		// If we see R_PPC64_TOCSAVE or R_PPC64_REL24_NOTOC
-		// relocations, we'll need to implement cases 2 and 3.
-		log.Fatalf("gencallstub only implements case 1 calls")
-	}
-
+// Create a calling stub. The stubType maps directly to the properties listed in the ELFv2 1.5
+// section 4.2.5.3.
+//
+// There are 3 cases today (as paraphrased from the ELFv2 document):
+//
+//  1. R2 holds the TOC pointer on entry. The call stub must save R2 into the ELFv2 TOC stack save slot.
+//
+//  2. R2 holds the TOC pointer on entry. The caller has already saved R2 to the TOC stack save slot.
+//
+//  3. R2 does not hold the TOC pointer on entry. The caller has no expectations of R2.
+//
+// Go only needs case 1 and 3 today. Go symbols which have AttrShare set could use case 2, but case 1 always
+// works in those cases too.
+func gencallstub(ctxt *ld.Link, ldr *loader.Loader, stubType int, stub *loader.SymbolBuilder, targ loader.Sym) {
 	plt := ctxt.PLT
-
 	stub.SetType(sym.STEXT)
 
-	// Save TOC pointer in TOC save slot
-	stub.AddUint32(ctxt.Arch, 0xf8410018) // std r2,24(r1)
-
-	// Load the function pointer from the PLT.
-	rel, ri1 := stub.AddRel(objabi.R_POWER_TOC)
-	rel.SetOff(int32(stub.Size()))
-	rel.SetSiz(2)
-	rel.SetAdd(int64(ldr.SymPlt(targ)))
-	rel.SetSym(plt)
-	if ctxt.Arch.ByteOrder == binary.BigEndian {
-		rel.SetOff(rel.Off() + int32(rel.Siz()))
+	switch stubType {
+	case 1:
+		// Save TOC, then load targ address from PLT using TOC.
+		stub.AddUint32(ctxt.Arch, 0xf8410018) // std r2,24(r1)
+		stub.AddSymRef(ctxt.Arch, plt, int64(ldr.SymPlt(targ)), objabi.R_ADDRPOWER_TOCREL_DS, 8)
+		stub.SetUint32(ctxt.Arch, stub.Size()-8, 0x3d820000) // addis r12,r2,targ@plt@toc@ha
+		stub.SetUint32(ctxt.Arch, stub.Size()-4, 0xe98c0000) // ld r12,targ@plt@toc@l(r12)
+	case 3:
+		// Load targ address from PLT. This is position dependent.
+		stub.AddSymRef(ctxt.Arch, plt, int64(ldr.SymPlt(targ)), objabi.R_ADDRPOWER_DS, 8)
+		stub.SetUint32(ctxt.Arch, stub.Size()-8, 0x3d800000) // lis r12,targ@plt@ha
+		stub.SetUint32(ctxt.Arch, stub.Size()-4, 0xe98c0000) // ld r12,targ@plt@l(r12)
+	default:
+		log.Fatalf("gencallstub does not support ELFv2 ABI property %d", stubType)
 	}
-	ldr.SetRelocVariant(stub.Sym(), int(ri1), sym.RV_POWER_HA)
-	stub.AddUint32(ctxt.Arch, 0x3d820000) // addis r12,r2,targ@plt@toc@ha
-
-	rel2, ri2 := stub.AddRel(objabi.R_POWER_TOC)
-	rel2.SetOff(int32(stub.Size()))
-	rel2.SetSiz(2)
-	rel2.SetAdd(int64(ldr.SymPlt(targ)))
-	rel2.SetSym(plt)
-	if ctxt.Arch.ByteOrder == binary.BigEndian {
-		rel2.SetOff(rel2.Off() + int32(rel2.Siz()))
-	}
-	ldr.SetRelocVariant(stub.Sym(), int(ri2), sym.RV_POWER_LO)
-	stub.AddUint32(ctxt.Arch, 0xe98c0000) // ld r12,targ@plt@toc@l(r12)
 
 	// Jump to the loaded pointer
 	stub.AddUint32(ctxt.Arch, 0x7d8903a6) // mtctr r12
@@ -432,7 +447,11 @@ func addelfdynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s lo
 		// callee. Hence, we need to go to the local entry
 		// point.  (If we don't do this, the callee will try
 		// to use r12 to compute r2.)
-		su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymLocalentry(targ)))
+		localEoffset := int64(ldr.SymLocalentry(targ))
+		if localEoffset == 1 {
+			ldr.Errorf(s, "Unsupported NOTOC call to %s", targ)
+		}
+		su.SetRelocAdd(rIdx, r.Add()+localEoffset)
 
 		if targType == sym.SDYNIMPORT {
 			// Should have been handled in elfsetupplt

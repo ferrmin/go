@@ -222,7 +222,7 @@ func (check *Checker) lhsVar(lhs syntax.Expr) Type {
 				return Typ[Invalid]
 			}
 		}
-		check.errorf(&x, UnassignableOperand, "cannot assign to %s", &x)
+		check.errorf(&x, UnassignableOperand, "cannot assign to %s (neither addressable nor a map index expression)", x.expr)
 		return Typ[Invalid]
 	}
 
@@ -235,9 +235,10 @@ func (check *Checker) lhsVar(lhs syntax.Expr) Type {
 func (check *Checker) assignVar(lhs, rhs syntax.Expr, x *operand) {
 	T := check.lhsVar(lhs) // nil if lhs is _
 	if T == Typ[Invalid] {
-		check.use(rhs)
 		if x != nil {
 			x.mode = invalid
+		} else {
+			check.use(rhs)
 		}
 		return
 	}

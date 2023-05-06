@@ -39,7 +39,9 @@ func scriptConditions() map[string]script.Cond {
 	add("asan", sysCondition("-asan", platform.ASanSupported, true))
 	add("buildmode", script.PrefixCondition("go supports -buildmode=<suffix>", hasBuildmode))
 	add("case-sensitive", script.OnceCondition("$WORK filesystem is case-sensitive", isCaseSensitive))
+	add("cc", script.PrefixCondition("go env CC = <suffix> (ignoring the go/env file)", ccIs))
 	add("cgo", script.BoolCondition("host CGO_ENABLED", testenv.HasCGO()))
+	add("cgolinkext", script.Condition("platform requires external linking for cgo", cgoLinkExt))
 	add("cross", script.BoolCondition("cmd/go GOOS/GOARCH != GOHOSTOS/GOHOSTARCH", goHostOS != runtime.GOOS || goHostArch != runtime.GOARCH))
 	add("fuzz", sysCondition("-fuzz", platform.FuzzSupported, false))
 	add("fuzz-instrumented", sysCondition("-fuzz with instrumentation", platform.FuzzInstrumented, false))
@@ -49,8 +51,8 @@ func scriptConditions() map[string]script.Cond {
 	add("link", lazyBool("testenv.HasLink()", testenv.HasLink))
 	add("mismatched-goroot", script.Condition("test's GOROOT_FINAL does not match the real GOROOT", isMismatchedGoroot))
 	add("msan", sysCondition("-msan", platform.MSanSupported, true))
-	add("cgolinkext", script.BoolCondition("platform requires external linking for cgo", platform.MustLinkExternal(cfg.Goos, cfg.Goarch, true)))
-	add("net", lazyBool("testenv.HasExternalNetwork()", testenv.HasExternalNetwork))
+	add("mustlinkext", script.Condition("platform always requires external linking", mustLinkExt))
+	add("net", script.PrefixCondition("can connect to external network host <suffix>", hasNet))
 	add("race", sysCondition("-race", platform.RaceDetectorSupported, true))
 	add("symlink", lazyBool("testenv.HasSymlink()", testenv.HasSymlink))
 	add("trimpath", script.OnceCondition("test binary was built with -trimpath", isTrimpath))
@@ -68,6 +70,16 @@ func defaultCCIsAbsolute(s *script.State) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func ccIs(s *script.State, want string) (bool, error) {
+	CC, _ := s.LookupEnv("CC")
+	if CC != "" {
+		return CC == want, nil
+	}
+	GOOS, _ := s.LookupEnv("GOOS")
+	GOARCH, _ := s.LookupEnv("GOARCH")
+	return cfg.DefaultCC(GOOS, GOARCH) == want, nil
 }
 
 func isMismatchedGoroot(s *script.State) (bool, error) {
@@ -93,6 +105,20 @@ func hasBuildmode(s *script.State, mode string) (bool, error) {
 	GOOS, _ := s.LookupEnv("GOOS")
 	GOARCH, _ := s.LookupEnv("GOARCH")
 	return platform.BuildModeSupported(runtime.Compiler, mode, GOOS, GOARCH), nil
+}
+
+func hasNet(s *script.State, host string) (bool, error) {
+	if !testenv.HasExternalNetwork() {
+		return false, nil
+	}
+
+	// TODO(bcmills): Add a flag or environment variable to allow skipping tests
+	// for specific hosts and/or skipping all net tests except for specific hosts.
+
+	// Since we have confirmed that the network is available,
+	// allow cmd/go to use it.
+	s.Setenv("TESTGONETWORK", "")
+	return true, nil
 }
 
 func hasGodebug(s *script.State, value string) (bool, error) {
@@ -170,4 +196,16 @@ func hasWorkingGit() bool {
 	}
 	_, err := exec.LookPath("git")
 	return err == nil
+}
+
+func cgoLinkExt(s *script.State) (bool, error) {
+	GOOS, _ := s.LookupEnv("GOOS")
+	GOARCH, _ := s.LookupEnv("GOARCH")
+	return platform.MustLinkExternal(GOOS, GOARCH, true), nil
+}
+
+func mustLinkExt(s *script.State) (bool, error) {
+	GOOS, _ := s.LookupEnv("GOOS")
+	GOARCH, _ := s.LookupEnv("GOARCH")
+	return platform.MustLinkExternal(GOOS, GOARCH, false), nil
 }

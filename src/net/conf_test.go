@@ -43,6 +43,15 @@ var defaultResolvConf = &dnsConfig{
 }
 
 func TestConfHostLookupOrder(t *testing.T) {
+	// These tests are written for a system with cgo available,
+	// without using the netgo tag.
+	if netGoBuildTag {
+		t.Skip("skipping test because net package built with netgo tag")
+	}
+	if !cgoAvailable {
+		t.Skip("skipping test because cgo resolver not available")
+	}
+
 	tests := []struct {
 		name      string
 		c         *conf
@@ -54,7 +63,8 @@ func TestConfHostLookupOrder(t *testing.T) {
 		{
 			name: "force",
 			c: &conf{
-				forceCgoLookupHost: true,
+				preferCgo: true,
+				netCgo:    true,
 			},
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, "foo: bar"),
@@ -82,12 +92,14 @@ func TestConfHostLookupOrder(t *testing.T) {
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, "hosts: dns files something_custom"),
 			hostTests: []nssHostTest{
-				{"x.com", "myhostname", hostLookupFilesDNS},
+				{"x.com", "myhostname", hostLookupDNSFiles},
 			},
 		},
 		{
-			name:   "ubuntu_trusty_avahi",
-			c:      &conf{},
+			name: "ubuntu_trusty_avahi",
+			c: &conf{
+				mdnsTest: mdnsAssumeDoesNotExist,
+			},
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, "hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4"),
 			hostTests: []nssHostTest{
@@ -203,8 +215,10 @@ func TestConfHostLookupOrder(t *testing.T) {
 			hostTests: []nssHostTest{{"google.com", "myhostname", hostLookupFilesDNS}},
 		},
 		{
-			name:   "files_mdns_dns",
-			c:      &conf{},
+			name: "files_mdns_dns",
+			c: &conf{
+				mdnsTest: mdnsAssumeDoesNotExist,
+			},
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, "hosts: files mdns dns"),
 			hostTests: []nssHostTest{
@@ -226,7 +240,7 @@ func TestConfHostLookupOrder(t *testing.T) {
 		{
 			name: "mdns_allow",
 			c: &conf{
-				hasMDNSAllow: true,
+				mdnsTest: mdnsAssumeExists,
 			},
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, "hosts: files mdns dns"),
@@ -294,8 +308,10 @@ func TestConfHostLookupOrder(t *testing.T) {
 			},
 		},
 		{
-			name:   "ubuntu14.04.02",
-			c:      &conf{},
+			name: "ubuntu14.04.02",
+			c: &conf{
+				mdnsTest: mdnsAssumeDoesNotExist,
+			},
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, "hosts: files myhostname mdns4_minimal [NOTFOUND=return] dns mdns4"),
 			hostTests: []nssHostTest{
@@ -325,31 +341,28 @@ func TestConfHostLookupOrder(t *testing.T) {
 			nss:       nssStr(t, "foo: bar"),
 			hostTests: []nssHostTest{{"google.com", "myhostname", hostLookupCgo}},
 		},
-		// Android should always use cgo.
-		{
-			name: "android",
-			c: &conf{
-				goos: "android",
-			},
-			resolv: defaultResolvConf,
-			nss:    nssStr(t, ""),
-			hostTests: []nssHostTest{
-				{"x.com", "myhostname", hostLookupCgo},
-			},
-		},
 		// Issue 24393: make sure "Resolver.PreferGo = true" acts like netgo.
 		{
 			name:     "resolver-prefergo",
 			resolver: &Resolver{PreferGo: true},
 			c: &conf{
-				goos:               "darwin",
-				forceCgoLookupHost: true, // always true for darwin
-				netCgo:             true,
+				preferCgo: true,
+				netCgo:    true,
 			},
 			resolv: defaultResolvConf,
 			nss:    nssStr(t, ""),
 			hostTests: []nssHostTest{
 				{"localhost", "myhostname", hostLookupFilesDNS},
+			},
+		},
+		{
+			name:     "unknown-source",
+			resolver: &Resolver{PreferGo: true},
+			c:        &conf{},
+			resolv:   defaultResolvConf,
+			nss:      nssStr(t, "hosts: resolve files"),
+			hostTests: []nssHostTest{
+				{"x.com", "myhostname", hostLookupDNSFiles},
 			},
 		},
 	}

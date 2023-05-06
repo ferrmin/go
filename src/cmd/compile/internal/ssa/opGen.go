@@ -1984,6 +1984,7 @@ const (
 	OpMIPS64NEGV
 	OpMIPS64NEGF
 	OpMIPS64NEGD
+	OpMIPS64ABSD
 	OpMIPS64SQRTD
 	OpMIPS64SQRTF
 	OpMIPS64SLLV
@@ -26555,6 +26556,19 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "ABSD",
+		argLen: 1,
+		asm:    mips.AABSD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1152921504338411520}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 1152921504338411520}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
 		name:   "SQRTD",
 		argLen: 1,
 		asm:    mips.ASQRTD,
@@ -29470,10 +29484,8 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "MOVDBRload",
-		auxType:        auxSymOff,
 		argLen:         2,
 		faultOnNilArg0: true,
-		symEffect:      SymRead,
 		asm:            ppc64.AMOVDBR,
 		reg: regInfo{
 			inputs: []inputInfo{
@@ -29486,10 +29498,8 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "MOVWBRload",
-		auxType:        auxSymOff,
 		argLen:         2,
 		faultOnNilArg0: true,
-		symEffect:      SymRead,
 		asm:            ppc64.AMOVWBR,
 		reg: regInfo{
 			inputs: []inputInfo{
@@ -29502,10 +29512,8 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "MOVHBRload",
-		auxType:        auxSymOff,
 		argLen:         2,
 		faultOnNilArg0: true,
-		symEffect:      SymRead,
 		asm:            ppc64.AMOVHBR,
 		reg: regInfo{
 			inputs: []inputInfo{
@@ -29684,10 +29692,8 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "MOVDBRstore",
-		auxType:        auxSym,
 		argLen:         3,
 		faultOnNilArg0: true,
-		symEffect:      SymWrite,
 		asm:            ppc64.AMOVDBR,
 		reg: regInfo{
 			inputs: []inputInfo{
@@ -29698,10 +29704,8 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "MOVWBRstore",
-		auxType:        auxSym,
 		argLen:         3,
 		faultOnNilArg0: true,
-		symEffect:      SymWrite,
 		asm:            ppc64.AMOVWBR,
 		reg: regInfo{
 			inputs: []inputInfo{
@@ -29712,10 +29716,8 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "MOVHBRstore",
-		auxType:        auxSym,
 		argLen:         3,
 		faultOnNilArg0: true,
-		symEffect:      SymWrite,
 		asm:            ppc64.AMOVHBR,
 		reg: regInfo{
 			inputs: []inputInfo{

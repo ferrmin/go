@@ -12,6 +12,7 @@
 package runtime
 
 import (
+	"internal/abi"
 	"internal/goarch"
 	"unsafe"
 )
@@ -167,7 +168,7 @@ func dumptype(t *_type) {
 
 	// If we've definitely serialized the type before,
 	// no need to do it again.
-	b := &typecache[t.hash&(typeCacheBuckets-1)]
+	b := &typecache[t.Hash&(typeCacheBuckets-1)]
 	if t == b.t[0] {
 		return
 	}
@@ -192,7 +193,7 @@ func dumptype(t *_type) {
 	// dump the type
 	dumpint(tagType)
 	dumpint(uint64(uintptr(unsafe.Pointer(t))))
-	dumpint(uint64(t.size))
+	dumpint(uint64(t.Size_))
 	if x := t.uncommon(); x == nil || t.nameOff(x.pkgpath).name() == "" {
 		dumpstr(t.string())
 	} else {
@@ -203,7 +204,7 @@ func dumptype(t *_type) {
 		dwritebyte('.')
 		dwrite(unsafe.Pointer(unsafe.StringData(name)), uintptr(len(name)))
 	}
-	dumpbool(t.kind&kindDirectIface == 0 || t.ptrdata != 0)
+	dumpbool(t.Kind_&kindDirectIface == 0 || t.PtrBytes != 0)
 }
 
 // dump an object.
@@ -257,7 +258,7 @@ func dumpframe(s *stkframe, child *childInfo) {
 	pcdata := int32(-1) // Use the entry map at function entry
 	if pc != f.entry() {
 		pc--
-		pcdata = pcdatavalue(f, _PCDATA_StackMapIndex, pc, nil)
+		pcdata = pcdatavalue(f, abi.PCDATA_StackMapIndex, pc, nil)
 	}
 	if pcdata == -1 {
 		// We do not have a valid pcdata value but there might be a
@@ -265,7 +266,7 @@ func dumpframe(s *stkframe, child *childInfo) {
 		// at the function prologue, assume so and hope for the best.
 		pcdata = 0
 	}
-	stkmap := (*stackmap)(funcdata(f, _FUNCDATA_LocalsPointerMaps))
+	stkmap := (*stackmap)(funcdata(f, abi.FUNCDATA_LocalsPointerMaps))
 
 	var bv bitvector
 	if stkmap != nil && stkmap.n > 0 {
@@ -326,7 +327,7 @@ func dumpframe(s *stkframe, child *childInfo) {
 	child.arglen = s.argBytes()
 	child.sp = (*uint8)(unsafe.Pointer(s.sp))
 	child.depth++
-	stkmap = (*stackmap)(funcdata(f, _FUNCDATA_ArgsPointerMaps))
+	stkmap = (*stackmap)(funcdata(f, abi.FUNCDATA_ArgsPointerMaps))
 	if stkmap != nil {
 		child.args = stackmapdata(stkmap, pcdata)
 	} else {

@@ -13,6 +13,7 @@
 package runtime
 
 import (
+	"internal/abi"
 	"internal/goarch"
 	"runtime/internal/atomic"
 	"runtime/internal/sys"
@@ -888,10 +889,10 @@ func traceStackID(mp *m, pcBuf []uintptr, skip int) uint64 {
 	gp := getg()
 	curgp := mp.curg
 	nstk := 1
-	if tracefpunwindoff() || mp.incgocallback() {
+	if tracefpunwindoff() || mp.hasCgoOnStack() {
 		// Slow path: Unwind using default unwinder. Used when frame pointer
 		// unwinding is unavailable or disabled (tracefpunwindoff), or might
-		// produce incomplete results or crashes (incgocallback). Note that no
+		// produce incomplete results or crashes (hasCgoOnStack). Note that no
 		// cgo callback related crashes have been observed yet. The main
 		// motivation is to take advantage of a potentially registered cgo
 		// symbolizer.
@@ -926,12 +927,10 @@ func traceStackID(mp *m, pcBuf []uintptr, skip int) uint64 {
 	return uint64(id)
 }
 
-// tracefpunwindoff returns false if frame pointer unwinding for the tracer is
+// tracefpunwindoff returns true if frame pointer unwinding for the tracer is
 // disabled via GODEBUG or not supported by the architecture.
 func tracefpunwindoff() bool {
-	// compiler emits frame pointers for amd64 and arm64, but issue 58432 blocks
-	// arm64 support for now.
-	return debug.tracefpunwindoff != 0 || goarch.ArchFamily != goarch.AMD64
+	return debug.tracefpunwindoff != 0 || (goarch.ArchFamily != goarch.AMD64 && goarch.ArchFamily != goarch.ARM64)
 }
 
 // fpTracebackPCs populates pcBuf with the return addresses for each frame and
@@ -1286,7 +1285,7 @@ func fpunwindExpand(pcBuf []uintptr) []uintptr {
 
 	var (
 		cache      pcvalueCache
-		lastFuncID = funcID_normal
+		lastFuncID = abi.FuncIDNormal
 		newPCBuf   = make([]uintptr, 0, traceStackSize)
 		skip       = pcBuf[0]
 		// skipOrAdd skips or appends retPC to newPCBuf and returns true if more
@@ -1317,7 +1316,7 @@ outer:
 		u, uf := newInlineUnwinder(fi, callPC, &cache)
 		for ; uf.valid(); uf = u.next(uf) {
 			sf := u.srcFunc(uf)
-			if sf.funcID == funcID_wrapper && elideWrapperCalling(lastFuncID) {
+			if sf.funcID == abi.FuncIDWrapper && elideWrapperCalling(lastFuncID) {
 				// ignore wrappers
 			} else if more := skipOrAdd(uf.pc + 1); !more {
 				break outer
@@ -1700,7 +1699,7 @@ func startPCforTrace(pc uintptr) uintptr {
 	if !f.valid() {
 		return pc // may happen for locked g in extra M since its pc is 0.
 	}
-	w := funcdata(f, _FUNCDATA_WrapInfo)
+	w := funcdata(f, abi.FUNCDATA_WrapInfo)
 	if w == nil {
 		return pc // not a wrapper
 	}
