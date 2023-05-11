@@ -185,8 +185,8 @@ func (p *abiDesc) tryRegAssignArg(t *_type, offset uintptr) bool {
 		}
 	case kindArray:
 		at := (*arraytype)(unsafe.Pointer(t))
-		if at.len == 1 {
-			return p.tryRegAssignArg(at.elem, offset)
+		if at.Len == 1 {
+			return p.tryRegAssignArg((*_type)(unsafe.Pointer(at.Elem)), offset) // TODO fix when runtime is fully commoned up w/ abi.Type
 		}
 	case kindStruct:
 		st := (*structtype)(unsafe.Pointer(t))

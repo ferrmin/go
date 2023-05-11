@@ -19,7 +19,9 @@ type textOff = abi.TextOff
 // ../cmd/compile/internal/reflectdata/reflect.go:/^func.dcommontype and
 // ../reflect/type.go:/^type.rtype.
 // ../internal/reflectlite/type.go:/^type.rtype.
-type _type abi.Type
+type _type struct {
+	abi.Type
+}
 
 func (t *_type) string() string {
 	s := t.nameOff(t.Str).name()
@@ -30,65 +32,7 @@ func (t *_type) string() string {
 }
 
 func (t *_type) uncommon() *uncommontype {
-	if t.TFlag&abi.TFlagUncommon == 0 {
-		return nil
-	}
-	switch t.Kind_ & kindMask {
-	case kindStruct:
-		type u struct {
-			structtype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindPtr:
-		type u struct {
-			ptrtype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindFunc:
-		type u struct {
-			functype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindSlice:
-		type u struct {
-			slicetype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindArray:
-		type u struct {
-			arraytype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindChan:
-		type u struct {
-			chantype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindMap:
-		type u struct {
-			maptype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	case kindInterface:
-		type u struct {
-			interfacetype
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	default:
-		type u struct {
-			_type
-			u uncommontype
-		}
-		return &(*u)(unsafe.Pointer(t)).u
-	}
+	return t.Uncommon()
 }
 
 func (t *_type) name() string {
@@ -116,7 +60,7 @@ func (t *_type) name() string {
 // types, not just named types.
 func (t *_type) pkgpath() string {
 	if u := t.uncommon(); u != nil {
-		return t.nameOff(u.pkgpath).name()
+		return t.nameOff(u.PkgPath).name()
 	}
 	switch t.Kind_ & kindMask {
 	case kindStruct:
@@ -293,30 +237,12 @@ func (t *functype) dotdotdot() bool {
 	return t.outCount&(1<<15) != 0
 }
 
-type method struct {
-	name nameOff
-	mtyp typeOff
-	ifn  textOff
-	tfn  textOff
-}
-
-type uncommontype struct {
-	pkgpath nameOff
-	mcount  uint16 // number of methods
-	xcount  uint16 // number of exported methods
-	moff    uint32 // offset from this uncommontype to [mcount]method
-	_       uint32 // unused
-}
-
-type imethod struct {
-	name nameOff
-	ityp typeOff
-}
+type uncommontype = abi.UncommonType
 
 type interfacetype struct {
 	typ     _type
 	pkgpath name
-	mhdr    []imethod
+	mhdr    []abi.Imethod
 }
 
 type maptype struct {
@@ -350,18 +276,9 @@ func (mt *maptype) hashMightPanic() bool { // true if hash function might panic
 	return mt.flags&16 != 0
 }
 
-type arraytype struct {
-	typ   _type
-	elem  *_type
-	slice *_type
-	len   uintptr
-}
+type arraytype = abi.ArrayType
 
-type chantype struct {
-	typ  _type
-	elem *_type
-	dir  uintptr
-}
+type chantype = abi.ChanType
 
 type slicetype struct {
 	typ  _type
@@ -523,6 +440,10 @@ type _typePair struct {
 	t2 *_type
 }
 
+func toType(t *abi.Type) *_type {
+	return (*_type)(unsafe.Pointer(t))
+}
+
 // typesEqual reports whether two types are equal.
 //
 // Everywhere in the runtime and reflect packages, it is assumed that
@@ -562,8 +483,8 @@ func typesEqual(t, v *_type, seen map[_typePair]struct{}) bool {
 		if ut == nil || uv == nil {
 			return false
 		}
-		pkgpatht := t.nameOff(ut.pkgpath).name()
-		pkgpathv := v.nameOff(uv.pkgpath).name()
+		pkgpatht := t.nameOff(ut.PkgPath).name()
+		pkgpathv := v.nameOff(uv.PkgPath).name()
 		if pkgpatht != pkgpathv {
 			return false
 		}
@@ -577,11 +498,11 @@ func typesEqual(t, v *_type, seen map[_typePair]struct{}) bool {
 	case kindArray:
 		at := (*arraytype)(unsafe.Pointer(t))
 		av := (*arraytype)(unsafe.Pointer(v))
-		return typesEqual(at.elem, av.elem, seen) && at.len == av.len
+		return typesEqual(toType(at.Elem), toType(av.Elem), seen) && at.Len == av.Len
 	case kindChan:
 		ct := (*chantype)(unsafe.Pointer(t))
 		cv := (*chantype)(unsafe.Pointer(v))
-		return ct.dir == cv.dir && typesEqual(ct.elem, cv.elem, seen)
+		return ct.Dir == cv.Dir && typesEqual(toType(ct.Elem), toType(cv.Elem), seen)
 	case kindFunc:
 		ft := (*functype)(unsafe.Pointer(t))
 		fv := (*functype)(unsafe.Pointer(v))
@@ -615,16 +536,16 @@ func typesEqual(t, v *_type, seen map[_typePair]struct{}) bool {
 			vm := &iv.mhdr[i]
 			// Note the mhdr array can be relocated from
 			// another module. See #17724.
-			tname := resolveNameOff(unsafe.Pointer(tm), tm.name)
-			vname := resolveNameOff(unsafe.Pointer(vm), vm.name)
+			tname := resolveNameOff(unsafe.Pointer(tm), tm.Name)
+			vname := resolveNameOff(unsafe.Pointer(vm), vm.Name)
 			if tname.name() != vname.name() {
 				return false
 			}
 			if tname.pkgPath() != vname.pkgPath() {
 				return false
 			}
-			tityp := resolveTypeOff(unsafe.Pointer(tm), tm.ityp)
-			vityp := resolveTypeOff(unsafe.Pointer(vm), vm.ityp)
+			tityp := resolveTypeOff(unsafe.Pointer(tm), tm.Typ)
+			vityp := resolveTypeOff(unsafe.Pointer(vm), vm.Typ)
 			if !typesEqual(tityp, vityp, seen) {
 				return false
 			}
