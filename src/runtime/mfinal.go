@@ -241,9 +241,9 @@ func runfinq() {
 				case kindInterface:
 					ityp := (*interfacetype)(unsafe.Pointer(f.fint))
 					// set up with empty interface
-					(*eface)(r)._type = &f.ot.typ
+					(*eface)(r)._type = &f.ot.Type
 					(*eface)(r).data = f.arg
-					if len(ityp.mhdr) != 0 {
+					if len(ityp.Methods) != 0 {
 						// convert to interface with methods
 						// this conversion is guaranteed to succeed - we checked in SetFinalizer
 						(*iface)(r).tab = assertE2I(ityp, (*eface)(r)._type)
@@ -372,10 +372,10 @@ func SetFinalizer(obj any, finalizer any) {
 		throw("runtime.SetFinalizer: first argument is nil")
 	}
 	if etyp.Kind_&kindMask != kindPtr {
-		throw("runtime.SetFinalizer: first argument is " + etyp.string() + ", not pointer")
+		throw("runtime.SetFinalizer: first argument is " + toRType(etyp).string() + ", not pointer")
 	}
 	ot := (*ptrtype)(unsafe.Pointer(etyp))
-	if ot.elem == nil {
+	if ot.Elem == nil {
 		throw("nil elem type!")
 	}
 
@@ -415,7 +415,7 @@ func SetFinalizer(obj any, finalizer any) {
 	if uintptr(e.data) != base {
 		// As an implementation detail we allow to set finalizers for an inner byte
 		// of an object if it could come from tiny alloc (see mallocgc for details).
-		if ot.elem == nil || ot.elem.PtrBytes != 0 || ot.elem.Size_ >= maxTinySize {
+		if ot.Elem == nil || ot.Elem.PtrBytes != 0 || ot.Elem.Size_ >= maxTinySize {
 			throw("runtime.SetFinalizer: pointer not at beginning of allocated block")
 		}
 	}
@@ -431,29 +431,29 @@ func SetFinalizer(obj any, finalizer any) {
 	}
 
 	if ftyp.Kind_&kindMask != kindFunc {
-		throw("runtime.SetFinalizer: second argument is " + ftyp.string() + ", not a function")
+		throw("runtime.SetFinalizer: second argument is " + toRType(ftyp).string() + ", not a function")
 	}
 	ft := (*functype)(unsafe.Pointer(ftyp))
-	if ft.dotdotdot() {
-		throw("runtime.SetFinalizer: cannot pass " + etyp.string() + " to finalizer " + ftyp.string() + " because dotdotdot")
+	if ft.IsVariadic() {
+		throw("runtime.SetFinalizer: cannot pass " + toRType(etyp).string() + " to finalizer " + toRType(ftyp).string() + " because dotdotdot")
 	}
-	if ft.inCount != 1 {
-		throw("runtime.SetFinalizer: cannot pass " + etyp.string() + " to finalizer " + ftyp.string())
+	if ft.InCount != 1 {
+		throw("runtime.SetFinalizer: cannot pass " + toRType(etyp).string() + " to finalizer " + toRType(ftyp).string())
 	}
-	fint := ft.in()[0]
+	fint := ft.InSlice()[0]
 	switch {
 	case fint == etyp:
 		// ok - same type
 		goto okarg
 	case fint.Kind_&kindMask == kindPtr:
-		if (fint.uncommon() == nil || etyp.uncommon() == nil) && (*ptrtype)(unsafe.Pointer(fint)).elem == ot.elem {
+		if (fint.Uncommon() == nil || etyp.Uncommon() == nil) && (*ptrtype)(unsafe.Pointer(fint)).Elem == ot.Elem {
 			// ok - not same type, but both pointers,
 			// one or the other is unnamed, and same element type, so assignable.
 			goto okarg
 		}
 	case fint.Kind_&kindMask == kindInterface:
 		ityp := (*interfacetype)(unsafe.Pointer(fint))
-		if len(ityp.mhdr) == 0 {
+		if len(ityp.Methods) == 0 {
 			// ok - satisfies empty interface
 			goto okarg
 		}
@@ -461,11 +461,11 @@ func SetFinalizer(obj any, finalizer any) {
 			goto okarg
 		}
 	}
-	throw("runtime.SetFinalizer: cannot pass " + etyp.string() + " to finalizer " + ftyp.string())
+	throw("runtime.SetFinalizer: cannot pass " + toRType(etyp).string() + " to finalizer " + toRType(ftyp).string())
 okarg:
 	// compute size needed for return parameters
 	nret := uintptr(0)
-	for _, t := range ft.out() {
+	for _, t := range ft.OutSlice() {
 		nret = alignUp(nret, uintptr(t.Align_)) + uintptr(t.Size_)
 	}
 	nret = alignUp(nret, goarch.PtrSize)
