@@ -410,6 +410,9 @@ func TestRaceSignal(t *testing.T) {
 		t.Skipf("skipping: test requires pthread support")
 		// TODO: Can this test be rewritten to use the C11 thread API instead?
 	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
+		testenv.SkipFlaky(t, 60316)
+	}
 
 	t.Parallel()
 
@@ -831,5 +834,18 @@ func TestDestructorCallbackRace(t *testing.T) {
 
 	if want := "OK\n"; string(got) != want {
 		t.Errorf("expected %q, but got:\n%s", want, got)
+	}
+}
+
+func TestEnsureBindM(t *testing.T) {
+	t.Parallel()
+	switch runtime.GOOS {
+	case "windows", "plan9":
+		t.Skipf("skipping bindm test on %s", runtime.GOOS)
+	}
+	got := runTestProg(t, "testprogcgo", "EnsureBindM")
+	want := "OK\n"
+	if got != want {
+		t.Errorf("expected %q, got %v", want, got)
 	}
 }

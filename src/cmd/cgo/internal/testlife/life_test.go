@@ -6,6 +6,7 @@ package life_test
 
 import (
 	"bytes"
+	"cmd/cgo/internal/cgotest"
 	"internal/testenv"
 	"log"
 	"os"
@@ -30,7 +31,7 @@ func testMain(m *testing.M) int {
 	// Copy testdata into GOPATH/src/cgolife, along with a go.mod file
 	// declaring the same path.
 	modRoot := filepath.Join(GOPATH, "src", "cgolife")
-	if err := overlayDir(modRoot, "testdata"); err != nil {
+	if err := cgotest.OverlayDir(modRoot, "testdata"); err != nil {
 		log.Panic(err)
 	}
 	if err := os.Chdir(modRoot); err != nil {
@@ -46,10 +47,8 @@ func testMain(m *testing.M) int {
 
 // TestTestRun runs a test case for cgo //export.
 func TestTestRun(t *testing.T) {
-	if os.Getenv("GOOS") == "android" {
-		t.Skip("the go tool runs with CGO_ENABLED=0 on the android device")
-	}
 	testenv.MustHaveGoRun(t)
+	testenv.MustHaveCGO(t)
 
 	cmd := exec.Command("go", "run", "main.go")
 	got, err := cmd.CombinedOutput()

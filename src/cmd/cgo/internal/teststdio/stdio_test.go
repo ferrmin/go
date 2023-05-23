@@ -6,6 +6,7 @@ package stdio_test
 
 import (
 	"bytes"
+	"cmd/cgo/internal/cgotest"
 	"internal/testenv"
 	"log"
 	"os"
@@ -31,7 +32,7 @@ func testMain(m *testing.M) int {
 	// Copy testdata into GOPATH/src/cgostdio, along with a go.mod file
 	// declaring the same path.
 	modRoot := filepath.Join(GOPATH, "src", "cgostdio")
-	if err := overlayDir(modRoot, "testdata"); err != nil {
+	if err := cgotest.OverlayDir(modRoot, "testdata"); err != nil {
 		log.Panic(err)
 	}
 	if err := os.Chdir(modRoot); err != nil {
@@ -48,9 +49,7 @@ func testMain(m *testing.M) int {
 // TestTestRun runs a cgo test that doesn't depend on non-standard libraries.
 func TestTestRun(t *testing.T) {
 	testenv.MustHaveGoRun(t)
-	if os.Getenv("GOOS") == "android" {
-		t.Skip("subpackage stdio is not available on android")
-	}
+	testenv.MustHaveCGO(t)
 
 	for _, file := range [...]string{
 		"chain.go",

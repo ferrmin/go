@@ -12,6 +12,7 @@ package carchive_test
 import (
 	"bufio"
 	"bytes"
+	"cmd/cgo/internal/cgotest"
 	"debug/elf"
 	"flag"
 	"fmt"
@@ -32,6 +33,8 @@ import (
 	"unicode"
 )
 
+var globalSkip = func(t *testing.T) {}
+
 // Program to run.
 var bin []string
 
@@ -49,22 +52,23 @@ var testWork bool // If true, preserve temporary directories.
 func TestMain(m *testing.M) {
 	flag.BoolVar(&testWork, "testwork", false, "if true, log and preserve the test's temporary working directory")
 	flag.Parse()
-	if testing.Short() && os.Getenv("GO_BUILDER_NAME") == "" {
-		fmt.Printf("SKIP - short mode and $GO_BUILDER_NAME not set\n")
-		os.Exit(0)
-	}
-	if runtime.GOOS == "linux" {
-		if _, err := os.Stat("/etc/alpine-release"); err == nil {
-			fmt.Printf("SKIP - skipping failing test on alpine - go.dev/issue/19938\n")
-			os.Exit(0)
-		}
-	}
 
 	log.SetFlags(log.Lshortfile)
 	os.Exit(testMain(m))
 }
 
 func testMain(m *testing.M) int {
+	if testing.Short() && os.Getenv("GO_BUILDER_NAME") == "" {
+		globalSkip = func(t *testing.T) { t.Skip("short mode and $GO_BUILDER_NAME not set") }
+		return m.Run()
+	}
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/etc/alpine-release"); err == nil {
+			globalSkip = func(t *testing.T) { t.Skip("skipping failing test on alpine - go.dev/issue/19938") }
+			return m.Run()
+		}
+	}
+
 	// We need a writable GOPATH in which to run the tests.
 	// Construct one in a temporary directory.
 	var err error
@@ -82,7 +86,7 @@ func testMain(m *testing.M) int {
 	// Copy testdata into GOPATH/src/testarchive, along with a go.mod file
 	// declaring the same path.
 	modRoot := filepath.Join(GOPATH, "src", "testcarchive")
-	if err := overlayDir(modRoot, "testdata"); err != nil {
+	if err := cgotest.OverlayDir(modRoot, "testdata"); err != nil {
 		log.Panic(err)
 	}
 	if err := os.Chdir(modRoot); err != nil {
@@ -460,7 +464,10 @@ func checkELFArchiveObject(t *testing.T, arname string, off int64, obj io.Reader
 }
 
 func TestInstall(t *testing.T) {
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	if !testWork {
 		defer os.RemoveAll(filepath.Join(GOPATH, "pkg"))
@@ -503,7 +510,10 @@ func TestEarlySignalHandler(t *testing.T) {
 	case "windows":
 		t.Skip("skipping signal test on Windows")
 	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	if !testWork {
 		defer func() {
@@ -544,6 +554,7 @@ func TestEarlySignalHandler(t *testing.T) {
 }
 
 func TestSignalForwarding(t *testing.T) {
+	globalSkip(t)
 	checkSignalForwardingTest(t)
 	buildSignalForwardingTest(t)
 
@@ -572,6 +583,7 @@ func TestSignalForwardingExternal(t *testing.T) {
 	} else if GOOS == "darwin" && GOARCH == "amd64" {
 		t.Skipf("skipping on %s/%s: runtime does not permit SI_USER SIGSEGV", GOOS, GOARCH)
 	}
+	globalSkip(t)
 	checkSignalForwardingTest(t)
 	buildSignalForwardingTest(t)
 
@@ -621,6 +633,7 @@ func TestSignalForwardingGo(t *testing.T) {
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" {
 		t.Skip("not supported on darwin-amd64")
 	}
+	globalSkip(t)
 
 	checkSignalForwardingTest(t)
 	buildSignalForwardingTest(t)
@@ -643,6 +656,9 @@ func checkSignalForwardingTest(t *testing.T) {
 	case "windows":
 		t.Skip("skipping signal test on Windows")
 	}
+	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 }
 
 // buildSignalForwardingTest builds the executable used by the various
@@ -771,7 +787,10 @@ func TestOsSignal(t *testing.T) {
 	case "windows":
 		t.Skip("skipping signal test on Windows")
 	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	if !testWork {
 		defer func() {
@@ -810,7 +829,10 @@ func TestSigaltstack(t *testing.T) {
 	case "windows":
 		t.Skip("skipping signal test on Windows")
 	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	if !testWork {
 		defer func() {
@@ -860,10 +882,11 @@ func TestExtar(t *testing.T) {
 	if runtime.Compiler == "gccgo" {
 		t.Skip("skipping -extar test when using gccgo")
 	}
-	if runtime.GOOS == "ios" {
-		t.Skip("shell scripts are not executable on iOS hosts")
-	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
+	testenv.MustHaveExecPath(t, "bash") // This test uses a bash script
 
 	if !testWork {
 		defer func() {
@@ -906,7 +929,10 @@ func TestPIE(t *testing.T) {
 	case "windows", "darwin", "ios", "plan9":
 		t.Skipf("skipping PIE test on %s", GOOS)
 	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	libgoa := "libgo.a"
 	if runtime.Compiler == "gccgo" {
@@ -1001,7 +1027,10 @@ func TestSIGPROF(t *testing.T) {
 	case "darwin", "ios":
 		t.Skipf("skipping SIGPROF test on %s; see https://golang.org/issue/19320", GOOS)
 	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	t.Parallel()
 
@@ -1048,6 +1077,7 @@ func TestSIGPROF(t *testing.T) {
 // will likely do it in the future. And it ought to work. This test
 // was added because at one time it did not work on PPC Linux.
 func TestCompileWithoutShared(t *testing.T) {
+	globalSkip(t)
 	// For simplicity, reuse the signal forwarding test.
 	checkSignalForwardingTest(t)
 	testenv.MustHaveGoBuild(t)
@@ -1115,7 +1145,11 @@ func TestCompileWithoutShared(t *testing.T) {
 
 // Test that installing a second time recreates the header file.
 func TestCachedInstall(t *testing.T) {
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
+
 	if !testWork {
 		defer os.RemoveAll(filepath.Join(GOPATH, "pkg"))
 	}
@@ -1155,7 +1189,11 @@ func TestCachedInstall(t *testing.T) {
 
 // Issue 35294.
 func TestManyCalls(t *testing.T) {
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
+
 	t.Parallel()
 
 	if !testWork {
@@ -1214,7 +1252,10 @@ func TestPreemption(t *testing.T) {
 	if runtime.Compiler == "gccgo" {
 		t.Skip("skipping asynchronous preemption test with gccgo")
 	}
+	globalSkip(t)
 	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
 
 	t.Parallel()
 
@@ -1243,6 +1284,65 @@ func TestPreemption(t *testing.T) {
 	}
 
 	argv := cmdToRun("./testp8")
+	cmd = exec.Command(argv[0], argv[1:]...)
+	sb := new(strings.Builder)
+	cmd.Stdout = sb
+	cmd.Stderr = sb
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	timer := time.AfterFunc(time.Minute,
+		func() {
+			t.Error("test program timed out")
+			cmd.Process.Kill()
+		},
+	)
+	defer timer.Stop()
+
+	err = cmd.Wait()
+	t.Logf("%v\n%s", cmd.Args, sb)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+// Issue 59294. Test calling Go function from C after using some
+// stack space.
+func TestDeepStack(t *testing.T) {
+	globalSkip(t)
+	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveBuildMode(t, "c-archive")
+
+	t.Parallel()
+
+	if !testWork {
+		defer func() {
+			os.Remove("testp9" + exeSuffix)
+			os.Remove("libgo9.a")
+			os.Remove("libgo9.h")
+		}()
+	}
+
+	cmd := exec.Command("go", "build", "-buildmode=c-archive", "-o", "libgo9.a", "./libgo9")
+	out, err := cmd.CombinedOutput()
+	t.Logf("%v\n%s", cmd.Args, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkLineComments(t, "libgo9.h")
+	checkArchive(t, "libgo9.a")
+
+	// build with -O0 so the C compiler won't optimize out the large stack frame
+	ccArgs := append(cc, "-O0", "-o", "testp9"+exeSuffix, "main9.c", "libgo9.a")
+	out, err = exec.Command(ccArgs[0], ccArgs[1:]...).CombinedOutput()
+	t.Logf("%v\n%s", ccArgs, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	argv := cmdToRun("./testp9")
 	cmd = exec.Command(argv[0], argv[1:]...)
 	sb := new(strings.Builder)
 	cmd.Stdout = sb
