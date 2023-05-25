@@ -1696,11 +1696,35 @@ func TestChdirAndGetwd(t *testing.T) {
 // Test that Chdir+Getwd is program-wide.
 func TestProgWideChdir(t *testing.T) {
 	const N = 10
-	const ErrPwd = "Error!"
-	c := make(chan bool)
-	cpwd := make(chan string, N)
+	var wg sync.WaitGroup
+	hold := make(chan struct{})
+	done := make(chan struct{})
+
+	d := t.TempDir()
+	oldwd, err := Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	defer func() {
+		if err := Chdir(oldwd); err != nil {
+			// It's not safe to continue with tests if we can't get back to
+			// the original working directory.
+			panic(err)
+		}
+	}()
+
+	// Note the deferred Wait must be called after the deferred close(done),
+	// to ensure the N goroutines have been released even if the main goroutine
+	// calls Fatalf. It must be called before the Chdir back to the original
+	// directory, and before the deferred deletion implied by TempDir,
+	// so as not to interfere while the N goroutines are still running.
+	defer wg.Wait()
+	defer close(done)
+
 	for i := 0; i < N; i++ {
+		wg.Add(1)
 		go func(i int) {
+			defer wg.Done()
 			// Lock half the goroutines in their own operating system
 			// thread to exercise more scheduler possibilities.
 			if i%2 == 1 {
@@ -1711,57 +1735,48 @@ func TestProgWideChdir(t *testing.T) {
 				// See issue 9428.
 				runtime.LockOSThread()
 			}
-			hasErr, closed := <-c
-			if !closed && hasErr {
-				cpwd <- ErrPwd
+			select {
+			case <-done:
+				return
+			case <-hold:
+			}
+			// Getwd might be wrong
+			f0, err := Stat(".")
+			if err != nil {
+				t.Error(err)
 				return
 			}
 			pwd, err := Getwd()
 			if err != nil {
-				t.Errorf("Getwd on goroutine %d: %v", i, err)
-				cpwd <- ErrPwd
+				t.Errorf("Getwd: %v", err)
 				return
 			}
-			cpwd <- pwd
+			if pwd != d {
+				t.Errorf("Getwd() = %q, want %q", pwd, d)
+				return
+			}
+			f1, err := Stat(pwd)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if !SameFile(f0, f1) {
+				t.Errorf(`Samefile(Stat("."), Getwd()) reports false (%s != %s)`, f0.Name(), f1.Name())
+				return
+			}
 		}(i)
 	}
-	oldwd, err := Getwd()
-	if err != nil {
-		c <- true
-		t.Fatalf("Getwd: %v", err)
-	}
-	d, err := MkdirTemp("", "test")
-	if err != nil {
-		c <- true
-		t.Fatalf("TempDir: %v", err)
-	}
-	defer func() {
-		if err := Chdir(oldwd); err != nil {
-			t.Fatalf("Chdir: %v", err)
-		}
-		RemoveAll(d)
-	}()
-	if err := Chdir(d); err != nil {
-		c <- true
+	if err = Chdir(d); err != nil {
 		t.Fatalf("Chdir: %v", err)
 	}
 	// OS X sets TMPDIR to a symbolic link.
 	// So we resolve our working directory again before the test.
 	d, err = Getwd()
 	if err != nil {
-		c <- true
 		t.Fatalf("Getwd: %v", err)
 	}
-	close(c)
-	for i := 0; i < N; i++ {
-		pwd := <-cpwd
-		if pwd == ErrPwd {
-			t.FailNow()
-		}
-		if pwd != d {
-			t.Errorf("Getwd returned %q; want %q", pwd, d)
-		}
-	}
+	close(hold)
+	wg.Wait()
 }
 
 func TestSeek(t *testing.T) {
@@ -2980,15 +2995,23 @@ func TestDirFS(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fs := DirFS("./testdata/dirfs")
-	if err := fstest.TestFS(fs, "a", "b", "dir/x"); err != nil {
+	fsys := DirFS("./testdata/dirfs")
+	if err := fstest.TestFS(fsys, "a", "b", "dir/x"); err != nil {
 		t.Fatal(err)
+	}
+
+	rdfs, ok := fsys.(fs.ReadDirFS)
+	if !ok {
+		t.Error("expected DirFS result to implement fs.ReadDirFS")
+	}
+	if _, err := rdfs.ReadDir("nonexistent"); err == nil {
+		t.Error("fs.ReadDir of nonexistent directory suceeded")
 	}
 
 	// Test that the error message does not contain a backslash,
 	// and does not contain the DirFS argument.
 	const nonesuch = "dir/nonesuch"
-	_, err := fs.Open(nonesuch)
+	_, err := fsys.Open(nonesuch)
 	if err == nil {
 		t.Error("fs.Open of nonexistent file succeeded")
 	} else {
@@ -3091,6 +3114,23 @@ func TestReadFileProc(t *testing.T) {
 		t.Skip(err)
 	}
 	data, err := ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		t.Fatalf("read %s: not newline-terminated: %q", name, data)
+	}
+}
+
+func TestDirFSReadFileProc(t *testing.T) {
+	t.Parallel()
+
+	fsys := DirFS("/")
+	name := "proc/sys/fs/pipe-max-size"
+	if _, err := fs.Stat(fsys, name); err != nil {
+		t.Skip()
+	}
+	data, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		t.Fatal(err)
 	}

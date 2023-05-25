@@ -34,6 +34,7 @@ import (
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
+	"cmd/go/internal/gover"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/modfetch"
 	"cmd/go/internal/modindex"
@@ -232,7 +233,7 @@ type PackageInternal struct {
 	CoverageCfg       string               // coverage info config file path (passed to compiler)
 	OmitDebug         bool                 // tell linker not to write debug information
 	GobinSubdir       bool                 // install target would be subdir of GOBIN
-	BuildInfo         string               // add this info to package main
+	BuildInfo         *debug.BuildInfo     // add this info to package main
 	TestmainGo        *[]byte              // content for _testmain.go
 	Embed             map[string][]string  // //go:embed comment mapping
 	OrigImportPath    string               // original import path before adding '_test' suffix
@@ -2259,9 +2260,15 @@ func isBadEmbedName(name string) bool {
 // to their VCS information.
 var vcsStatusCache par.ErrCache[string, vcs.Status]
 
-// setBuildInfo gathers build information, formats it as a string to be
-// embedded in the binary, then sets p.Internal.BuildInfo to that string.
-// setBuildInfo should only be called on a main package with no errors.
+func appendBuildSetting(info *debug.BuildInfo, key, value string) {
+	value = strings.ReplaceAll(value, "\n", " ") // make value safe
+	info.Settings = append(info.Settings, debug.BuildSetting{Key: key, Value: value})
+}
+
+// setBuildInfo gathers build information and sets it into
+// p.Internal.BuildInfo, which will later be formatted as a string and embedded
+// in the binary. setBuildInfo should only be called on a main package with no
+// errors.
 //
 // This information can be retrieved using debug.ReadBuildInfo.
 //
@@ -2321,7 +2328,7 @@ func (p *Package) setBuildInfo(ctx context.Context, autoVCS bool) {
 	for mod := range mdeps {
 		sortedMods = append(sortedMods, mod)
 	}
-	module.Sort(sortedMods)
+	gover.ModSort(sortedMods)
 	deps := make([]*debug.Module, len(sortedMods))
 	for i, mod := range sortedMods {
 		deps[i] = mdeps[mod]
@@ -2337,8 +2344,7 @@ func (p *Package) setBuildInfo(ctx context.Context, autoVCS bool) {
 		Deps: deps,
 	}
 	appendSetting := func(key, value string) {
-		value = strings.ReplaceAll(value, "\n", " ") // make value safe
-		info.Settings = append(info.Settings, debug.BuildSetting{Key: key, Value: value})
+		appendBuildSetting(info, key, value)
 	}
 
 	// Add command-line flags relevant to the build.
@@ -2379,13 +2385,7 @@ func (p *Package) setBuildInfo(ctx context.Context, autoVCS bool) {
 			appendSetting("-ldflags", ldflags)
 		}
 	}
-	if p.Internal.PGOProfile != "" {
-		if cfg.BuildTrimpath {
-			appendSetting("-pgo", filepath.Base(p.Internal.PGOProfile))
-		} else {
-			appendSetting("-pgo", p.Internal.PGOProfile)
-		}
-	}
+	// N.B. -pgo added later by setPGOProfilePath.
 	if cfg.BuildMSan {
 		appendSetting("-msan", "true")
 	}
@@ -2533,7 +2533,7 @@ func (p *Package) setBuildInfo(ctx context.Context, autoVCS bool) {
 	}
 omitVCS:
 
-	p.Internal.BuildInfo = info.String()
+	p.Internal.BuildInfo = info
 }
 
 // SafeArg reports whether arg is a "safe" command-line argument,
@@ -2915,6 +2915,19 @@ func PackagesAndErrors(ctx context.Context, opts PackageOpts, patterns []string)
 // setPGOProfilePath sets the PGO profile path for pkgs.
 // In -pgo=auto mode, it finds the default PGO profile.
 func setPGOProfilePath(pkgs []*Package) {
+	updateBuildInfo := func(p *Package, file string) {
+		// Don't create BuildInfo for packages that didn't already have it.
+		if p.Internal.BuildInfo == nil {
+			return
+		}
+
+		if cfg.BuildTrimpath {
+			appendBuildSetting(p.Internal.BuildInfo, "-pgo", filepath.Base(file))
+		} else {
+			appendBuildSetting(p.Internal.BuildInfo, "-pgo", file)
+		}
+	}
+
 	switch cfg.BuildPGO {
 	case "off":
 		return
@@ -2961,6 +2974,7 @@ func setPGOProfilePath(pkgs []*Package) {
 					p.Internal.ForMain = pmain.ImportPath
 				}
 				p.Internal.PGOProfile = file
+				updateBuildInfo(p, file)
 				// Recurse to dependencies.
 				for i, pp := range p.Internal.Imports {
 					p.Internal.Imports[i] = split(pp)
@@ -2982,6 +2996,7 @@ func setPGOProfilePath(pkgs []*Package) {
 
 		for _, p := range PackageList(pkgs) {
 			p.Internal.PGOProfile = file
+			updateBuildInfo(p, file)
 		}
 	}
 }
@@ -3230,9 +3245,10 @@ func PackagesAndErrorsOutsideModule(ctx context.Context, opts PackageOpts, args 
 
 	// Check that the arguments satisfy syntactic constraints.
 	var version string
+	var firstPath string
 	for _, arg := range args {
 		if i := strings.Index(arg, "@"); i >= 0 {
-			version = arg[i+1:]
+			firstPath, version = arg[:i], arg[i+1:]
 			if version == "" {
 				return nil, fmt.Errorf("%s: version must not be empty", arg)
 			}
@@ -3270,7 +3286,7 @@ func PackagesAndErrorsOutsideModule(ctx context.Context, opts PackageOpts, args 
 	// later arguments, and other modules would. Let's not try to be too
 	// magical though.
 	allowed := modload.CheckAllowed
-	if modload.IsRevisionQuery(version) {
+	if modload.IsRevisionQuery(firstPath, version) {
 		// Don't check for retractions if a specific revision is requested.
 		allowed = nil
 	}
