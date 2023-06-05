@@ -384,19 +384,23 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	oldReqs := reqsFromGoMod(modload.ModFile())
 
 	if err := modload.WriteGoMod(ctx, opts); err != nil {
-		if tooNew, ok := err.(*gover.TooNewError); ok {
-			// This can happen for 'go get go@newversion'
-			// when all the required modules are old enough
-			// but the command line is not.
-			// TODO(bcmills): Perhaps LoadModGraph should catch this,
-			// in which case the tryVersion here should be removed.
-			tryVersion(ctx, tooNew.GoVersion)
-		}
-		base.Fatalf("go: %v", err)
+		// A TooNewError can happen for 'go get go@newversion'
+		// when all the required modules are old enough
+		// but the command line is not.
+		// TODO(bcmills): modload.EditBuildList should catch this instead,
+		// and then this can be changed to base.Fatal(err).
+		toolchain.SwitchOrFatal(ctx, err)
 	}
 
 	newReqs := reqsFromGoMod(modload.ModFile())
 	r.reportChanges(oldReqs, newReqs)
+
+	if gowork := modload.FindGoWork(base.Cwd()); gowork != "" {
+		wf, err := modload.ReadWorkFile(gowork)
+		if err == nil && modload.UpdateWorkGoVersion(wf, modload.MainModules.GoVersion()) {
+			modload.WriteWorkFile(gowork, wf)
+		}
+	}
 }
 
 // parseArgs parses command-line arguments and reports errors.
@@ -409,7 +413,7 @@ func parseArgs(ctx context.Context, rawArgs []string) (dropToolchain bool, queri
 	for _, arg := range search.CleanPatterns(rawArgs) {
 		q, err := newQuery(arg)
 		if err != nil {
-			base.Errorf("go: %v", err)
+			base.Error(err)
 			continue
 		}
 
@@ -491,8 +495,10 @@ type matchInModuleKey struct {
 func newResolver(ctx context.Context, queries []*query) *resolver {
 	// LoadModGraph also sets modload.Target, which is needed by various resolver
 	// methods.
-	const defaultGoVersion = ""
-	mg := modload.LoadModGraph(ctx, defaultGoVersion)
+	mg, err := modload.LoadModGraph(ctx, "")
+	if err != nil {
+		toolchain.SwitchOrFatal(ctx, err)
+	}
 
 	buildList := mg.BuildList()
 	initialVersion := make(map[string]string, len(buildList))
@@ -1143,6 +1149,7 @@ func (r *resolver) loadPackages(ctx context.Context, patterns []string, findPack
 		LoadTests:                *getT,
 		AssumeRootsImported:      true, // After 'go get foo', imports of foo should build.
 		SilencePackageErrors:     true, // May be fixed by subsequent upgrades or downgrades.
+		Switcher:                 new(toolchain.Switcher),
 	}
 
 	opts.AllowPackage = func(ctx context.Context, path string, m module.Version) error {
@@ -1226,16 +1233,19 @@ func (r *resolver) resolveQueries(ctx context.Context, queries []*query) (change
 
 		// If we found modules that were too new, find the max of the required versions
 		// and then try to switch to a newer toolchain.
-		goVers := ""
+		var sw toolchain.Switcher
 		for _, q := range queries {
 			for _, cs := range q.candidates {
-				if e, ok := cs.err.(*gover.TooNewError); ok && gover.Compare(goVers, e.GoVersion) < 0 {
-					goVers = e.GoVersion
-				}
+				sw.Error(cs.err)
 			}
 		}
-		if goVers != "" {
-			tryVersion(ctx, goVers)
+		// Only switch if we need a newer toolchain.
+		// Otherwise leave the cs.err for reporting later.
+		if sw.NeedSwitch() {
+			sw.Switch(ctx)
+			// If NeedSwitch is true and Switch returns, Switch has failed to locate a newer toolchain.
+			// It printed the errors along with one more about not finding a good toolchain.
+			base.Exit()
 		}
 
 		for _, q := range queries {
@@ -1328,7 +1338,7 @@ func (r *resolver) applyUpgrades(ctx context.Context, upgrades []pathSet) (chang
 	var tentative []module.Version
 	for _, cs := range upgrades {
 		if cs.err != nil {
-			base.Errorf("go: %v", cs.err)
+			base.Error(cs.err)
 			continue
 		}
 
@@ -1666,7 +1676,7 @@ func (r *resolver) checkPackageProblems(ctx context.Context, pkgPatterns []strin
 	}
 	for _, err := range sumErrs {
 		if err != nil {
-			base.Errorf("go: %v", err)
+			base.Error(err)
 		}
 	}
 	base.ExitIfErrors()
@@ -1773,6 +1783,10 @@ func (r *resolver) reportChanges(oldReqs, newReqs []module.Version) {
 			fmt.Fprintf(os.Stderr, "go: removed %s %s\n", c.path, c.old)
 		} else if gover.ModCompare(c.path, c.new, c.old) > 0 {
 			fmt.Fprintf(os.Stderr, "go: upgraded %s %s => %s\n", c.path, c.old, c.new)
+			if c.path == "go" && gover.Compare(c.old, gover.ExplicitIndirectVersion) < 0 && gover.Compare(c.new, gover.ExplicitIndirectVersion) >= 0 {
+				fmt.Fprintf(os.Stderr, "\tnote: expanded dependencies to upgrade to go %s or higher; run 'go mod tidy' to clean up\n", gover.ExplicitIndirectVersion)
+			}
+
 		} else {
 			fmt.Fprintf(os.Stderr, "go: downgraded %s %s => %s\n", c.path, c.old, c.new)
 		}
@@ -1831,10 +1845,13 @@ func (r *resolver) updateBuildList(ctx context.Context, additions []module.Versi
 
 	changed, err := modload.EditBuildList(ctx, additions, resolved)
 	if err != nil {
+		if errors.Is(err, gover.ErrTooNew) {
+			toolchain.SwitchOrFatal(ctx, err)
+		}
+
 		var constraint *modload.ConstraintError
 		if !errors.As(err, &constraint) {
-			base.Errorf("go: %v", err)
-			return false
+			base.Fatal(err)
 		}
 
 		if cfg.BuildV {
@@ -1873,8 +1890,12 @@ func (r *resolver) updateBuildList(ctx context.Context, additions []module.Versi
 		return false
 	}
 
-	const defaultGoVersion = ""
-	r.buildList = modload.LoadModGraph(ctx, defaultGoVersion).BuildList()
+	mg, err := modload.LoadModGraph(ctx, "")
+	if err != nil {
+		toolchain.SwitchOrFatal(ctx, err)
+	}
+
+	r.buildList = mg.BuildList()
 	r.buildListVersion = make(map[string]string, len(r.buildList))
 	for _, m := range r.buildList {
 		r.buildListVersion[m.Path] = m.Version
@@ -1911,23 +1932,4 @@ func isNoSuchModuleVersion(err error) bool {
 func isNoSuchPackageVersion(err error) bool {
 	var noPackage *modload.PackageNotInModuleError
 	return isNoSuchModuleVersion(err) || errors.As(err, &noPackage)
-}
-
-// tryVersion tries to switch to a Go toolchain appropriate for version,
-// which was either found in a go.mod file of a dependency or resolved
-// on the command line from go@v.
-func tryVersion(ctx context.Context, version string) {
-	if !gover.IsValid(version) {
-		fmt.Fprintf(os.Stderr, "go: misuse of tryVersion: invalid version %q\n", version)
-		return
-	}
-	if (!toolchain.HasAuto() && !toolchain.HasPath()) || gover.Compare(version, gover.Local()) <= 0 {
-		return
-	}
-	tv, err := toolchain.NewerToolchain(ctx, version)
-	if err != nil {
-		base.Errorf("go: %v\n", err)
-	}
-	fmt.Fprintf(os.Stderr, "go: switching to %v\n", tv)
-	toolchain.SwitchTo(tv)
 }

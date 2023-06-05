@@ -47,6 +47,9 @@ type Requirements struct {
 	// given module path. The root modules of the graph are the set of main
 	// modules in workspace mode, and the main module's direct requirements
 	// outside workspace mode.
+	//
+	// The roots are always expected to contain an entry for the "go" module,
+	// indicating the Go language version in use.
 	rootModules    []module.Version
 	maxRootVersion map[string]string
 
@@ -114,35 +117,24 @@ func mustHaveGoRoot(roots []module.Version) {
 func newRequirements(pruning modPruning, rootModules []module.Version, direct map[string]bool) *Requirements {
 	mustHaveGoRoot(rootModules)
 
-	if pruning == workspace {
-		return &Requirements{
-			pruning:        pruning,
-			rootModules:    slices.Clip(rootModules),
-			maxRootVersion: nil,
-			direct:         direct,
+	if pruning != workspace {
+		if workFilePath != "" {
+			panic("in workspace mode, but pruning is not workspace in newRequirements")
 		}
 	}
 
-	if workFilePath != "" && pruning != workspace {
-		panic("in workspace mode, but pruning is not workspace in newRequirements")
-	}
-	for i, m := range rootModules {
-		if m.Version == "" && MainModules.Contains(m.Path) {
-			panic(fmt.Sprintf("newRequirements called with untrimmed build list: rootModules[%v] is a main module", i))
+	if pruning != workspace {
+		if workFilePath != "" {
+			panic("in workspace mode, but pruning is not workspace in newRequirements")
 		}
-		if m.Path == "" || m.Version == "" {
-			panic(fmt.Sprintf("bad requirement: rootModules[%v] = %v", i, m))
+		for i, m := range rootModules {
+			if m.Version == "" && MainModules.Contains(m.Path) {
+				panic(fmt.Sprintf("newRequirements called with untrimmed build list: rootModules[%v] is a main module", i))
+			}
+			if m.Path == "" || m.Version == "" {
+				panic(fmt.Sprintf("bad requirement: rootModules[%v] = %v", i, m))
+			}
 		}
-	}
-
-	// Allow unsorted root modules, because go and toolchain
-	// are treated as the final graph roots but not trimmed from the build list,
-	// so they always appear at the beginning of the list.
-	r := slices.Clip(slices.Clone(rootModules))
-	gover.ModSort(r)
-	if !reflect.DeepEqual(r, rootModules) {
-		fmt.Fprintln(os.Stderr, "RM", rootModules)
-		panic("unsorted")
 	}
 
 	rs := &Requirements{
@@ -152,11 +144,22 @@ func newRequirements(pruning modPruning, rootModules []module.Version, direct ma
 		direct:         direct,
 	}
 
-	for _, m := range rootModules {
+	for i, m := range rootModules {
+		if i > 0 {
+			prev := rootModules[i-1]
+			if prev.Path > m.Path || (prev.Path == m.Path && gover.ModCompare(m.Path, prev.Version, m.Version) > 0) {
+				panic(fmt.Sprintf("newRequirements called with unsorted roots: %v", rootModules))
+			}
+		}
+
 		if v, ok := rs.maxRootVersion[m.Path]; ok && gover.ModCompare(m.Path, v, m.Version) >= 0 {
 			continue
 		}
 		rs.maxRootVersion[m.Path] = m.Version
+	}
+
+	if rs.maxRootVersion["go"] == "" {
+		panic(`newRequirements called without a "go" version`)
 	}
 	return rs
 }
@@ -194,7 +197,7 @@ func (rs *Requirements) initVendor(vendorList []module.Version) {
 				}
 			}
 			if inconsistent {
-				base.Fatalf("go: %v", errGoModDirty)
+				base.Fatal(errGoModDirty)
 			}
 
 			// Now we can treat the rest of the module graph as effectively “pruned
@@ -218,6 +221,15 @@ func (rs *Requirements) initVendor(vendorList []module.Version) {
 
 		rs.graph.Store(&cachedGraph{mg, nil})
 	})
+}
+
+// GoVersion returns the Go language version for the Requirements.
+func (rs *Requirements) GoVersion() string {
+	v, _ := rs.rootSelected("go")
+	if v == "" {
+		panic("internal error: missing go version in modload.Requirements")
+	}
+	return v
 }
 
 // rootSelected returns the version of the root dependency with the given module
@@ -537,10 +549,18 @@ func (mg *ModuleGraph) allRootsSelected() bool {
 // Modules are loaded automatically (and lazily) in LoadPackages:
 // LoadModGraph need only be called if LoadPackages is not,
 // typically in commands that care about modules but no particular package.
-func LoadModGraph(ctx context.Context, goVersion string) *ModuleGraph {
-	rs := LoadModFile(ctx)
+func LoadModGraph(ctx context.Context, goVersion string) (*ModuleGraph, error) {
+	rs, err := loadModFile(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	if goVersion != "" {
+		v, _ := rs.rootSelected("go")
+		if gover.Compare(v, gover.GoStrictVersion) >= 0 && gover.Compare(goVersion, v) < 0 {
+			return nil, fmt.Errorf("requested Go version %s cannot load module graph (requires Go >= %s)", goVersion, v)
+		}
+
 		pruning := pruningForGoVersion(goVersion)
 		if pruning == unpruned && rs.pruning != unpruned {
 			// Use newRequirements instead of convertDepth because convertDepth
@@ -549,21 +569,15 @@ func LoadModGraph(ctx context.Context, goVersion string) *ModuleGraph {
 			rs = newRequirements(unpruned, rs.rootModules, rs.direct)
 		}
 
-		mg, err := rs.Graph(ctx)
-		if err != nil {
-			base.Fatalf("go: %v", err)
-		}
-		return mg
+		return rs.Graph(ctx)
 	}
 
 	rs, mg, err := expandGraph(ctx, rs)
 	if err != nil {
-		base.Fatalf("go: %v", err)
+		return nil, err
 	}
-
 	requirements = rs
-
-	return mg
+	return mg, err
 }
 
 // expandGraph loads the complete module graph from rs.
