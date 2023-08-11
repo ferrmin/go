@@ -98,6 +98,7 @@ type CmdFlags struct {
 	DwarfLocationLists *bool        "help:\"add location lists to DWARF in optimized mode\""                      // &Ctxt.Flag_locationlists, set below
 	Dynlink            *bool        "help:\"support references to Go symbols defined in other shared libraries\"" // &Ctxt.Flag_dynlink, set below
 	EmbedCfg           func(string) "help:\"read go:embed configuration from `file`\""
+	Env                func(string) "help:\"add `definition` of the form key=value to environment\""
 	GenDwarfInl        int          "help:\"generate DWARF inline info records\"" // 0=disabled, 1=funcs, 2=funcs+formals/locals
 	GoVersion          string       "help:\"required version of the runtime\""
 	ImportCfg          func(string) "help:\"read import configuration from `file`\""
@@ -143,6 +144,14 @@ type CmdFlags struct {
 	}
 }
 
+func addEnv(s string) {
+	i := strings.Index(s, "=")
+	if i < 0 {
+		log.Fatal("-env argument must be of the form key=value")
+	}
+	os.Setenv(s[:i], s[i+1:])
+}
+
 // ParseFlags parses the command-line flags into Flag.
 func ParseFlags() {
 	Flag.I = addImportDir
@@ -158,6 +167,7 @@ func ParseFlags() {
 	*Flag.DwarfLocationLists = true
 	Flag.Dynlink = &Ctxt.Flag_dynlink
 	Flag.EmbedCfg = readEmbedCfg
+	Flag.Env = addEnv
 	Flag.GenDwarfInl = 2
 	Flag.ImportCfg = readImportCfg
 	Flag.CoverageCfg = readCoverageCfg
@@ -470,26 +480,22 @@ func readImportCfg(file string) {
 			continue
 		}
 
-		var verb, args string
-		if i := strings.Index(line, " "); i < 0 {
-			verb = line
-		} else {
-			verb, args = line[:i], strings.TrimSpace(line[i+1:])
+		verb, args, found := strings.Cut(line, " ")
+		if found {
+			args = strings.TrimSpace(args)
 		}
-		var before, after string
-		if i := strings.Index(args, "="); i >= 0 {
-			before, after = args[:i], args[i+1:]
-		}
+		before, after, hasEq := strings.Cut(args, "=")
+
 		switch verb {
 		default:
 			log.Fatalf("%s:%d: unknown directive %q", file, lineNum, verb)
 		case "importmap":
-			if before == "" || after == "" {
+			if !hasEq || before == "" || after == "" {
 				log.Fatalf(`%s:%d: invalid importmap: syntax is "importmap old=new"`, file, lineNum)
 			}
 			Flag.Cfg.ImportMap[before] = after
 		case "packagefile":
-			if before == "" || after == "" {
+			if !hasEq || before == "" || after == "" {
 				log.Fatalf(`%s:%d: invalid packagefile: syntax is "packagefile path=filename"`, file, lineNum)
 			}
 			Flag.Cfg.PackageFile[before] = after
