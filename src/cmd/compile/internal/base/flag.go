@@ -9,7 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"internal/buildcfg"
-	"internal/coverage"
+	"internal/coverage/covcmd"
 	"internal/platform"
 	"log"
 	"os"
@@ -133,11 +133,11 @@ type CmdFlags struct {
 			Patterns map[string][]string
 			Files    map[string]string
 		}
-		ImportDirs   []string                   // appended to by -I
-		ImportMap    map[string]string          // set by -importcfg
-		PackageFile  map[string]string          // set by -importcfg; nil means not in use
-		CoverageInfo *coverage.CoverFixupConfig // set by -coveragecfg
-		SpectreIndex bool                       // set by -spectre=index or -spectre=all
+		ImportDirs   []string                 // appended to by -I
+		ImportMap    map[string]string        // set by -importcfg
+		PackageFile  map[string]string        // set by -importcfg; nil means not in use
+		CoverageInfo *covcmd.CoverFixupConfig // set by -coveragecfg
+		SpectreIndex bool                     // set by -spectre=index or -spectre=all
 		// Whether we are adding any sort of code instrumentation, such as
 		// when the race detector is enabled.
 		Instrumenting bool
@@ -181,6 +181,7 @@ func ParseFlags() {
 	Debug.PGOInline = 1
 	Debug.PGODevirtualize = 1
 	Debug.SyncFrames = -1 // disable sync markers by default
+	Debug.ZeroCopy = 1
 
 	Debug.Checkptr = -1 // so we can tell whether it is set explicitly
 
@@ -504,7 +505,7 @@ func readImportCfg(file string) {
 }
 
 func readCoverageCfg(file string) {
-	var cfg coverage.CoverFixupConfig
+	var cfg covcmd.CoverFixupConfig
 	data, err := os.ReadFile(file)
 	if err != nil {
 		log.Fatalf("-coveragecfg: %v", err)

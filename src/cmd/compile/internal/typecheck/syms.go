@@ -9,7 +9,6 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
-	"cmd/internal/src"
 )
 
 func LookupRuntime(name string) *ir.Name {
@@ -17,7 +16,7 @@ func LookupRuntime(name string) *ir.Name {
 	if s == nil || s.Def == nil {
 		base.Fatalf("LookupRuntime: can't find runtime.%s", name)
 	}
-	return ir.AsNode(s.Def).(*ir.Name)
+	return s.Def.(*ir.Name)
 }
 
 // SubstArgTypes substitutes the given list of types for
@@ -30,9 +29,8 @@ func SubstArgTypes(old *ir.Name, types_ ...*types.Type) *ir.Name {
 	for _, t := range types_ {
 		types.CalcSize(t)
 	}
-	n := ir.NewNameAt(old.Pos(), old.Sym())
+	n := ir.NewNameAt(old.Pos(), old.Sym(), types.SubstAny(old.Type(), &types_))
 	n.Class = old.Class
-	n.SetType(types.SubstAny(old.Type(), &types_))
 	n.Func = old.Func
 	if len(types_) > 0 {
 		base.Fatalf("SubstArgTypes: too many argument types")
@@ -75,9 +73,9 @@ func InitRuntime() {
 		typ := typs[d.typ]
 		switch d.tag {
 		case funcTag:
-			importfunc(src.NoXPos, sym, typ)
+			importfunc(sym, typ)
 		case varTag:
-			importvar(src.NoXPos, sym, typ)
+			importvar(sym, typ)
 		default:
 			base.Fatalf("unhandled declaration tag %v", d.tag)
 		}
@@ -111,9 +109,9 @@ func InitCoverage() {
 		typ := typs[d.typ]
 		switch d.tag {
 		case funcTag:
-			importfunc(src.NoXPos, sym, typ)
+			importfunc(sym, typ)
 		case varTag:
-			importvar(src.NoXPos, sym, typ)
+			importvar(sym, typ)
 		default:
 			base.Fatalf("unhandled declaration tag %v", d.tag)
 		}
@@ -128,5 +126,5 @@ func LookupCoverage(name string) *ir.Name {
 	if sym == nil {
 		base.Fatalf("LookupCoverage: can't find runtime/coverage.%s", name)
 	}
-	return ir.AsNode(sym.Def).(*ir.Name)
+	return sym.Def.(*ir.Name)
 }
