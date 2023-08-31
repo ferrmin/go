@@ -339,7 +339,7 @@ func CanInline(fn *ir.Func, profile *pgo.Profile) {
 	// when creating the "Inline.Dcl" field below; to accomplish this,
 	// the hairyVisitor below builds up a map of used/referenced
 	// locals, and we use this map to produce a pruned Inline.Dcl
-	// list. See issue 25249 for more context.
+	// list. See issue 25459 for more context.
 
 	visitor := hairyVisitor{
 		curFunc:       fn,
@@ -354,15 +354,15 @@ func CanInline(fn *ir.Func, profile *pgo.Profile) {
 	}
 
 	n.Func.Inl = &ir.Inline{
-		Cost: budget - visitor.budget,
-		Dcl:  pruneUnusedAutos(n.Defn.(*ir.Func).Dcl, &visitor),
-		Body: inlcopylist(fn.Body),
+		Cost:    budget - visitor.budget,
+		Dcl:     pruneUnusedAutos(n.Func.Dcl, &visitor),
+		HaveDcl: true,
 
 		CanDelayResults: canDelayResults(fn),
 	}
 
 	if base.Flag.LowerM > 1 {
-		fmt.Printf("%v: can inline %v with cost %d as: %v { %v }\n", ir.Line(fn), n, budget-visitor.budget, fn.Type(), ir.Nodes(n.Func.Inl.Body))
+		fmt.Printf("%v: can inline %v with cost %d as: %v { %v }\n", ir.Line(fn), n, budget-visitor.budget, fn.Type(), ir.Nodes(fn.Body))
 	} else if base.Flag.LowerM != 0 {
 		fmt.Printf("%v: can inline %v\n", ir.Line(fn), n)
 	}
@@ -505,6 +505,7 @@ func (v *hairyVisitor) doNode(n ir.Node) bool {
 	if n == nil {
 		return false
 	}
+opSwitch:
 	switch n.Op() {
 	// Call is okay if inlinable and we have the budget for the body.
 	case ir.OCALLFUNC:
@@ -516,22 +517,19 @@ func (v *hairyVisitor) doNode(n ir.Node) bool {
 		var cheap bool
 		if n.X.Op() == ir.ONAME {
 			name := n.X.(*ir.Name)
-			if name.Class == ir.PFUNC && types.IsRuntimePkg(name.Sym().Pkg) {
-				fn := name.Sym().Name
-				if fn == "getcallerpc" || fn == "getcallersp" {
+			if name.Class == ir.PFUNC {
+				switch fn := types.RuntimeSymName(name.Sym()); fn {
+				case "getcallerpc", "getcallersp":
 					v.reason = "call to " + fn
 					return true
-				}
-				if fn == "throw" {
+				case "throw":
 					v.budget -= inlineExtraThrowCost
-					break
+					break opSwitch
 				}
-			}
-			// Special case for reflect.noescpae. It does just type
-			// conversions to appease the escape analysis, and doesn't
-			// generate code.
-			if name.Class == ir.PFUNC && types.IsReflectPkg(name.Sym().Pkg) {
-				if name.Sym().Name == "noescape" {
+				// Special case for reflect.noescape. It does just type
+				// conversions to appease the escape analysis, and doesn't
+				// generate code.
+				if types.ReflectSymName(name.Sym()) == "noescape" {
 					cheap = true
 				}
 			}
@@ -553,7 +551,7 @@ func (v *hairyVisitor) doNode(n ir.Node) bool {
 			if meth := ir.MethodExprName(n.X); meth != nil {
 				if fn := meth.Func; fn != nil {
 					s := fn.Sym()
-					if types.IsRuntimePkg(s.Pkg) && s.Name == "heapBits.nextArena" {
+					if types.RuntimeSymName(s) == "heapBits.nextArena" {
 						// Special case: explicitly allow mid-stack inlining of
 						// runtime.heapBits.next even though it calls slow-path
 						// runtime.heapBits.nextArena.
@@ -791,46 +789,6 @@ func isBigFunc(fn *ir.Func) bool {
 	})
 }
 
-// inlcopylist (together with inlcopy) recursively copies a list of nodes, except
-// that it keeps the same ONAME, OTYPE, and OLITERAL nodes. It is used for copying
-// the body and dcls of an inlineable function.
-func inlcopylist(ll []ir.Node) []ir.Node {
-	s := make([]ir.Node, len(ll))
-	for i, n := range ll {
-		s[i] = inlcopy(n)
-	}
-	return s
-}
-
-// inlcopy is like DeepCopy(), but does extra work to copy closures.
-func inlcopy(n ir.Node) ir.Node {
-	var edit func(ir.Node) ir.Node
-	edit = func(x ir.Node) ir.Node {
-		switch x.Op() {
-		case ir.ONAME, ir.OTYPE, ir.OLITERAL, ir.ONIL:
-			return x
-		}
-		m := ir.Copy(x)
-		ir.EditChildren(m, edit)
-		if x.Op() == ir.OCLOSURE {
-			x := x.(*ir.ClosureExpr)
-			// Need to save/duplicate x.Func.Nname,
-			// x.Func.Nname.Ntype, x.Func.Dcl, x.Func.ClosureVars, and
-			// x.Func.Body for iexport and local inlining.
-			oldfn := x.Func
-			newfn := ir.NewFunc(oldfn.Pos(), oldfn.Nname.Pos(), oldfn.Nname.Sym(), oldfn.Nname.Type())
-			m.(*ir.ClosureExpr).Func = newfn
-			// XXX OK to share fn.Type() ??
-			newfn.Body = inlcopylist(oldfn.Body)
-			// Make shallow copy of the Dcl and ClosureVar slices
-			newfn.Dcl = append([]*ir.Name(nil), oldfn.Dcl...)
-			newfn.ClosureVars = append([]*ir.Name(nil), oldfn.ClosureVars...)
-		}
-		return m
-	}
-	return edit(n)
-}
-
 // InlineCalls/inlnode walks fn's statements and expressions and substitutes any
 // calls made to inlineable functions. This is the external entry point.
 func InlineCalls(fn *ir.Func, profile *pgo.Profile) {
@@ -906,8 +864,11 @@ func inlnode(callerfn *ir.Func, n ir.Node, bigCaller bool, inlCalls *[]*ir.Inlin
 			// even when package reflect was compiled without it (#35073).
 			if meth := ir.MethodExprName(n.X); meth != nil {
 				s := meth.Sym()
-				if base.Debug.Checkptr != 0 && types.IsReflectPkg(s.Pkg) && (s.Name == "Value.UnsafeAddr" || s.Name == "Value.Pointer") {
-					return n
+				if base.Debug.Checkptr != 0 {
+					switch types.ReflectSymName(s) {
+					case "Value.UnsafeAddr", "Value.Pointer":
+						return n
+					}
 				}
 			}
 		}
@@ -1207,6 +1168,9 @@ func pruneUnusedAutos(ll []*ir.Name, vis *hairyVisitor) []*ir.Name {
 	for _, n := range ll {
 		if n.Class == ir.PAUTO {
 			if !vis.usedLocals.Has(n) {
+				// TODO(mdempsky): Simplify code after confident that this
+				// never happens anymore.
+				base.FatalfAt(n.Pos(), "unused auto: %v", n)
 				continue
 			}
 		}

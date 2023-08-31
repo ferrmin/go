@@ -345,7 +345,12 @@ func (ctxt *Link) fileSymbol(fn *LSym) *LSym {
 // populateDWARF fills in the DWARF Debugging Information Entries for
 // TEXT symbol 's'. The various DWARF symbols must already have been
 // initialized in InitTextSym.
-func (ctxt *Link) populateDWARF(curfn interface{}, s *LSym, myimportpath string) {
+func (ctxt *Link) populateDWARF(curfn Func, s *LSym) {
+	myimportpath := ctxt.Pkgpath
+	if myimportpath == "" {
+		return
+	}
+
 	info, loc, ranges, absfunc, lines := ctxt.dwarfSym(s)
 	if info.Size != 0 {
 		ctxt.Diag("makeFuncDebugEntry double process %v", s)
@@ -353,16 +358,13 @@ func (ctxt *Link) populateDWARF(curfn interface{}, s *LSym, myimportpath string)
 	var scopes []dwarf.Scope
 	var inlcalls dwarf.InlCalls
 	if ctxt.DebugInfo != nil {
-		// Don't need startPos because s.Func().StartLine is populated,
-		// as s is in this package.
-		scopes, inlcalls, _ = ctxt.DebugInfo(s, info, curfn)
+		scopes, inlcalls = ctxt.DebugInfo(s, info, curfn)
 	}
 	var err error
 	dwctxt := dwCtxt{ctxt}
 	filesym := ctxt.fileSymbol(s)
 	fnstate := &dwarf.FnState{
 		Name:          s.Name,
-		Importpath:    myimportpath,
 		Info:          info,
 		Filesym:       filesym,
 		Loc:           loc,
@@ -394,7 +396,8 @@ func (ctxt *Link) populateDWARF(curfn interface{}, s *LSym, myimportpath string)
 
 // DwarfIntConst creates a link symbol for an integer constant with the
 // given name, type and value.
-func (ctxt *Link) DwarfIntConst(myimportpath, name, typename string, val int64) {
+func (ctxt *Link) DwarfIntConst(name, typename string, val int64) {
+	myimportpath := ctxt.Pkgpath
 	if myimportpath == "" {
 		return
 	}
@@ -407,7 +410,8 @@ func (ctxt *Link) DwarfIntConst(myimportpath, name, typename string, val int64) 
 
 // DwarfGlobal creates a link symbol containing a DWARF entry for
 // a global variable.
-func (ctxt *Link) DwarfGlobal(myimportpath, typename string, varSym *LSym) {
+func (ctxt *Link) DwarfGlobal(typename string, varSym *LSym) {
+	myimportpath := ctxt.Pkgpath
 	if myimportpath == "" || varSym.Local() {
 		return
 	}
@@ -421,7 +425,7 @@ func (ctxt *Link) DwarfGlobal(myimportpath, typename string, varSym *LSym) {
 	dwarf.PutGlobal(dwCtxt{ctxt}, dieSym, typeSym, varSym, varname)
 }
 
-func (ctxt *Link) DwarfAbstractFunc(curfn interface{}, s *LSym, myimportpath string) {
+func (ctxt *Link) DwarfAbstractFunc(curfn Func, s *LSym) {
 	absfn := ctxt.DwFixups.AbsFuncDwarfSym(s)
 	if absfn.Size != 0 {
 		ctxt.Diag("internal error: DwarfAbstractFunc double process %v", s)
@@ -429,12 +433,11 @@ func (ctxt *Link) DwarfAbstractFunc(curfn interface{}, s *LSym, myimportpath str
 	if s.Func() == nil {
 		s.NewFuncInfo()
 	}
-	scopes, _, startPos := ctxt.DebugInfo(s, absfn, curfn)
-	_, startLine := ctxt.getFileSymbolAndLine(startPos)
+	scopes, _ := ctxt.DebugInfo(s, absfn, curfn)
+	_, startLine := ctxt.getFileSymbolAndLine(curfn.Pos())
 	dwctxt := dwCtxt{ctxt}
 	fnstate := dwarf.FnState{
 		Name:          s.Name,
-		Importpath:    myimportpath,
 		Info:          absfn,
 		Absfn:         absfn,
 		StartLine:     startLine,
@@ -510,8 +513,8 @@ type relFixup struct {
 }
 
 type fnState struct {
-	// precursor function (really *gc.Node)
-	precursor interface{}
+	// precursor function
+	precursor Func
 	// abstract function symbol
 	absfn *LSym
 }
@@ -524,14 +527,14 @@ func NewDwarfFixupTable(ctxt *Link) *DwarfFixupTable {
 	}
 }
 
-func (ft *DwarfFixupTable) GetPrecursorFunc(s *LSym) interface{} {
+func (ft *DwarfFixupTable) GetPrecursorFunc(s *LSym) Func {
 	if fnstate, found := ft.precursor[s]; found {
 		return fnstate.precursor
 	}
 	return nil
 }
 
-func (ft *DwarfFixupTable) SetPrecursorFunc(s *LSym, fn interface{}) {
+func (ft *DwarfFixupTable) SetPrecursorFunc(s *LSym, fn Func) {
 	if _, found := ft.precursor[s]; found {
 		ft.ctxt.Diag("internal error: DwarfFixupTable.SetPrecursorFunc double call on %v", s)
 	}

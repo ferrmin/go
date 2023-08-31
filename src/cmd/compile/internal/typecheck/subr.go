@@ -51,61 +51,7 @@ func NodAddr(n ir.Node) *ir.AddrExpr {
 
 // NodAddrAt returns a node representing &n at position pos.
 func NodAddrAt(pos src.XPos, n ir.Node) *ir.AddrExpr {
-	n = markAddrOf(n)
-	return ir.NewAddrExpr(pos, n)
-}
-
-func markAddrOf(n ir.Node) ir.Node {
-	if IncrementalAddrtaken {
-		// We can only do incremental addrtaken computation when it is ok
-		// to typecheck the argument of the OADDR. That's only safe after the
-		// main typecheck has completed, and not loading the inlined body.
-		// The argument to OADDR needs to be typechecked because &x[i] takes
-		// the address of x if x is an array, but not if x is a slice.
-		// Note: OuterValue doesn't work correctly until n is typechecked.
-		n = typecheck(n, ctxExpr)
-		if x := ir.OuterValue(n); x.Op() == ir.ONAME {
-			x.Name().SetAddrtaken(true)
-		}
-	} else {
-		// Remember that we built an OADDR without computing the Addrtaken bit for
-		// its argument. We'll do that later in bulk using computeAddrtaken.
-		DirtyAddrtaken = true
-	}
-	return n
-}
-
-// If IncrementalAddrtaken is false, we do not compute Addrtaken for an OADDR Node
-// when it is built. The Addrtaken bits are set in bulk by computeAddrtaken.
-// If IncrementalAddrtaken is true, then when an OADDR Node is built the Addrtaken
-// field of its argument is updated immediately.
-var IncrementalAddrtaken = false
-
-// If DirtyAddrtaken is true, then there are OADDR whose corresponding arguments
-// have not yet been marked as Addrtaken.
-var DirtyAddrtaken = false
-
-func ComputeAddrtaken(funcs []*ir.Func) {
-	var doVisit func(n ir.Node)
-	doVisit = func(n ir.Node) {
-		if n.Op() == ir.OADDR {
-			if x := ir.OuterValue(n.(*ir.AddrExpr).X); x.Op() == ir.ONAME {
-				x.Name().SetAddrtaken(true)
-				if x.Name().IsClosureVar() {
-					// Mark the original variable as Addrtaken so that capturevars
-					// knows not to pass it by value.
-					x.Name().Defn.Name().SetAddrtaken(true)
-				}
-			}
-		}
-		if n.Op() == ir.OCLOSURE {
-			ir.VisitList(n.(*ir.ClosureExpr).Func.Body, doVisit)
-		}
-	}
-
-	for _, fn := range funcs {
-		ir.Visit(fn, doVisit)
-	}
+	return ir.NewAddrExpr(pos, Expr(n))
 }
 
 // LinksymAddr returns a new expression that evaluates to the address
@@ -763,12 +709,10 @@ func implements(t, iface *types.Type, m, samename **types.Field, ptr *int) bool 
 			*ptr = 0
 			return false
 		}
-		followptr := tm.Embedded == 2
 
 		// if pointer receiver in method,
 		// the method does not exist for value types.
-		rcvr := tm.Type.Recv().Type
-		if rcvr.IsPtr() && !t0.IsPtr() && !followptr && !types.IsInterfaceMethod(tm.Type) {
+		if !types.IsMethodApplicable(t0, tm) {
 			if false && base.Flag.LowerR != 0 {
 				base.Errorf("interface pointer mismatch")
 			}

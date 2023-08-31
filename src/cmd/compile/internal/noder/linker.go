@@ -233,7 +233,7 @@ func (l *linker) exportBody(obj *ir.Name, local bool) {
 	//
 	// TODO(mdempsky): Reimplement the reachable method crawling logic
 	// from typecheck/crawler.go.
-	exportBody := local || fn.Inl.Body != nil
+	exportBody := local || fn.Inl.HaveDcl
 	if !exportBody {
 		return
 	}
@@ -289,10 +289,8 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Uint64(uint64(name.Func.ABI))
 
 	// Escape analysis.
-	for _, fs := range &types.RecvsParams {
-		for _, f := range fs(name.Type()) {
-			w.String(f.Note)
-		}
+	for _, f := range name.Type().RecvParams() {
+		w.String(f.Note)
 	}
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {
