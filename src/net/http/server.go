@@ -23,6 +23,7 @@ import (
 	urlpkg "net/url"
 	"path"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2346,7 +2347,8 @@ func RedirectHandler(url string, code int) Handler {
 type ServeMux struct {
 	mu       sync.RWMutex
 	tree     routingNode
-	patterns []*pattern
+	index    routingIndex
+	patterns []*pattern // TODO(jba): remove if possible
 }
 
 // NewServeMux allocates and returns a new ServeMux.
@@ -2423,13 +2425,13 @@ func (mux *ServeMux) findHandler(r *Request) (h Handler, patStr string, _ *patte
 	// TODO(jba): use escaped path. This is an independent change that is also part
 	// of proposal https://go.dev/issue/61410.
 	path := r.URL.Path
-
+	host := r.URL.Host
 	// CONNECT requests are not canonicalized.
 	if r.Method == "CONNECT" {
 		// If r.URL.Path is /tree and its handler is not registered,
 		// the /tree -> /tree/ redirect applies to CONNECT requests
 		// but the path canonicalization does not.
-		_, _, u := mux.matchOrRedirect(r.URL.Host, r.Method, path, r.URL)
+		_, _, u := mux.matchOrRedirect(host, r.Method, path, r.URL)
 		if u != nil {
 			return RedirectHandler(u.String(), StatusMovedPermanently), u.Path, nil, nil
 		}
@@ -2439,7 +2441,7 @@ func (mux *ServeMux) findHandler(r *Request) (h Handler, patStr string, _ *patte
 	} else {
 		// All other requests have any port stripped and path cleaned
 		// before passing to mux.handler.
-		host := stripHostPort(r.Host)
+		host = stripHostPort(r.Host)
 		path = cleanPath(path)
 
 		// If the given path is /tree and its handler is not registered,
@@ -2460,7 +2462,16 @@ func (mux *ServeMux) findHandler(r *Request) (h Handler, patStr string, _ *patte
 		}
 	}
 	if n == nil {
-		// TODO(jba): support 405 (MethodNotAllowed) by checking for patterns with different methods.
+		// We didn't find a match with the request method. To distinguish between
+		// Not Found and Method Not Allowed, see if there is another pattern that
+		// matches except for the method.
+		allowedMethods := mux.matchingMethods(host, path)
+		if len(allowedMethods) > 0 {
+			return HandlerFunc(func(w ResponseWriter, r *Request) {
+				w.Header().Set("Allow", strings.Join(allowedMethods, ", "))
+				Error(w, StatusText(StatusMethodNotAllowed), StatusMethodNotAllowed)
+			}), "", nil, nil
+		}
 		return NotFoundHandler(), "", nil, nil
 	}
 	return n.handler, n.pattern.String(), n.pattern, matches
@@ -2542,6 +2553,30 @@ func exactMatch(n *routingNode, path string) bool {
 	return len(n.pattern.segments) == strings.Count(path, "/")
 }
 
+// matchingMethods return a sorted list of all methods that would match with the given host and path.
+func (mux *ServeMux) matchingMethods(host, path string) []string {
+	// Hold the read lock for the entire method so that the two matches are done
+	// on the same set of registered patterns.
+	mux.mu.RLock()
+	defer mux.mu.RUnlock()
+	ms := map[string]bool{}
+	mux.tree.matchingMethods(host, path, ms)
+	// matchOrRedirect will try appending a trailing slash if there is no match.
+	mux.tree.matchingMethods(host, path+"/", ms)
+	methods := mapKeys(ms)
+	sort.Strings(methods)
+	return methods
+}
+
+// TODO: replace with maps.Keys when it is defined.
+func mapKeys[K comparable, V any](m map[K]V) []K {
+	var ks []K
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
 // ServeHTTP dispatches the request to the handler whose
 // pattern most closely matches the request URL.
 func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
@@ -2590,8 +2625,8 @@ func (mux *ServeMux) register(pattern string, handler Handler) {
 	}
 }
 
-func (mux *ServeMux) registerErr(pattern string, handler Handler) error {
-	if pattern == "" {
+func (mux *ServeMux) registerErr(patstr string, handler Handler) error {
+	if patstr == "" {
 		return errors.New("http: invalid pattern")
 	}
 	if handler == nil {
@@ -2601,9 +2636,9 @@ func (mux *ServeMux) registerErr(pattern string, handler Handler) error {
 		return errors.New("http: nil handler")
 	}
 
-	pat, err := parsePattern(pattern)
+	pat, err := parsePattern(patstr)
 	if err != nil {
-		return fmt.Errorf("parsing %q: %w", pattern, err)
+		return fmt.Errorf("parsing %q: %w", patstr, err)
 	}
 
 	// Get the caller's location, for better conflict error messages.
@@ -2618,16 +2653,18 @@ func (mux *ServeMux) registerErr(pattern string, handler Handler) error {
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
 	// Check for conflict.
-	// This makes a quadratic number of calls to conflictsWith: we check
-	// each pattern against every other pattern.
-	// TODO(jba): add indexing to speed this up.
-	for _, pat2 := range mux.patterns {
+	if err := mux.index.possiblyConflictingPatterns(pat, func(pat2 *pattern) error {
 		if pat.conflictsWith(pat2) {
-			return fmt.Errorf("pattern %q (registered at %s) conflicts with pattern %q (registered at %s)",
-				pat, pat.loc, pat2, pat2.loc)
+			d := describeConflict(pat, pat2)
+			return fmt.Errorf("pattern %q (registered at %s) conflicts with pattern %q (registered at %s):\n%s",
+				pat, pat.loc, pat2, pat2.loc, d)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	mux.tree.addPattern(pat, handler)
+	mux.index.addPattern(pat)
 	mux.patterns = append(mux.patterns, pat)
 	return nil
 }

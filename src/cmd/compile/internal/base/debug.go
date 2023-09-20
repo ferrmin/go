@@ -22,6 +22,7 @@ type DebugFlags struct {
 	Defer                 int    `help:"print information about defer compilation"`
 	DisableNil            int    `help:"disable nil checks" concurrent:"ok"`
 	DumpInlFuncProps      string `help:"dump function properties from inl heuristics to specified file"`
+	DumpInlCallSiteScores int    `help:"dump scored callsites during inlining"`
 	DumpPtrs              int    `help:"show Node pointers values in dump output"`
 	DwarfInl              int    `help:"print information about DWARF inlined function creation"`
 	EscapeMutationsCalls  int    `help:"print extra escape analysis diagnostics about mutations and calls" concurrent:"ok"`
@@ -54,6 +55,7 @@ type DebugFlags struct {
 	ABIWrap               int    `help:"print information about ABI wrapper generation"`
 	MayMoreStack          string `help:"call named function before all stack growth checks" concurrent:"ok"`
 	PGODebug              int    `help:"debug profile-guided optimizations"`
+	PGOHash               string `help:"hash value for debugging profile-guided optimizations" concurrent:"ok"`
 	PGOInline             int    `help:"enable profile-guided inlining" concurrent:"ok"`
 	PGOInlineCDFThreshold string `help:"cumulative threshold percentage for determining call sites as hot candidates for inlining" concurrent:"ok"`
 	PGOInlineBudget       int    `help:"inline budget for hot functions" concurrent:"ok"`
