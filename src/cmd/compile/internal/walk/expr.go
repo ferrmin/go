@@ -583,6 +583,17 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		return e
 	}
 
+	if name, ok := n.X.(*ir.Name); ok {
+		sym := name.Sym()
+		if sym.Pkg.Path == "go.runtime" && sym.Name == "deferrangefunc" {
+			// Call to runtime.deferrangefunc is being shared with a range-over-func
+			// body that might add defers to this frame, so we cannot use open-coded defers
+			// and we need to call deferreturn even if we don't see any other explicit defers.
+			ir.CurFunc.SetHasDefer(true)
+			ir.CurFunc.SetOpenCodedDeferDisallowed(true)
+		}
+	}
+
 	walkCall1(n, init)
 	return n
 }
@@ -956,16 +967,6 @@ func usemethod(n *ir.CallExpr) {
 		case fn == "(*interfaceType).Method", fn == "(*interfaceType).MethodByName":
 			return
 		case fn == "Value.Method", fn == "Value.MethodByName":
-			return
-		// StructOf defines closures that look up methods. They only look up methods
-		// reachable via interfaces. The DCE does not remove such methods. It is ok
-		// to not flag closures in StructOf as ReflectMethods and let the DCE run
-		// even if StructOf is reachable.
-		//
-		// (*rtype).MethodByName calls into StructOf so flagging StructOf as
-		// ReflectMethod would disable the DCE even when the name of a method
-		// to look up is a compile-time constant.
-		case strings.HasPrefix(fn, "StructOf.func"):
 			return
 		}
 	}

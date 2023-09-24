@@ -12,6 +12,10 @@
 #define TEB_TlsSlots 0x1480
 #define TEB_ArbitraryPtr 0x28
 
+TEXT runtime·asmstdcall_trampoline<ABIInternal>(SB),NOSPLIT,$0
+	MOVQ	AX, CX
+	JMP	runtime·asmstdcall(SB)
+
 // void runtime·asmstdcall(void *c);
 TEXT runtime·asmstdcall(SB),NOSPLIT,$16
 	MOVQ	SP, AX
@@ -237,37 +241,6 @@ TEXT runtime·tstart_stdcall(SB),NOSPLIT|NOFRAME,$0
 TEXT runtime·settls(SB),NOSPLIT,$0
 	MOVQ	runtime·tls_g(SB), CX
 	MOVQ	DI, 0(CX)(GS)
-	RET
-
-// Runs on OS stack.
-// duration (in -100ns units) is in dt+0(FP).
-// g may be nil.
-// The function leaves room for 4 syscall parameters
-// (as per windows amd64 calling convention).
-TEXT runtime·usleep2(SB),NOSPLIT,$48-4
-	MOVLQSX	dt+0(FP), BX
-	MOVQ	SP, AX
-	ANDQ	$~15, SP	// alignment as per Windows requirement
-	MOVQ	AX, 40(SP)
-	LEAQ	32(SP), R8  // ptime
-	MOVQ	BX, (R8)
-	MOVQ	$-1, CX // handle
-	MOVQ	$0, DX // alertable
-	MOVQ	runtime·_NtWaitForSingleObject(SB), AX
-	CALL	AX
-	MOVQ	40(SP), SP
-	RET
-
-// Runs on OS stack.
-TEXT runtime·switchtothread(SB),NOSPLIT,$0
-	MOVQ	SP, AX
-	ANDQ	$~15, SP	// alignment as per Windows requirement
-	SUBQ	$(48), SP	// room for SP and 4 args as per Windows requirement
-				// plus one extra word to keep stack 16 bytes aligned
-	MOVQ	AX, 32(SP)
-	MOVQ	runtime·_SwitchToThread(SB), AX
-	CALL	AX
-	MOVQ	32(SP), SP
 	RET
 
 TEXT runtime·nanotime1(SB),NOSPLIT,$0-8

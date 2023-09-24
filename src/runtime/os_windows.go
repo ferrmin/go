@@ -138,7 +138,6 @@ var (
 	// Load ntdll.dll manually during startup, otherwise Mingw
 	// links wrong printf function to cgo executable (see issue
 	// 12030 for details).
-	_NtWaitForSingleObject  stdFunction
 	_RtlGetCurrentPeb       stdFunction
 	_RtlGetNtVersionNumbers stdFunction
 
@@ -269,7 +268,6 @@ func loadOptionalSyscalls() {
 	if n32 == 0 {
 		throw("ntdll.dll not found")
 	}
-	_NtWaitForSingleObject = windowsFindfunc(n32, []byte("NtWaitForSingleObject\000"))
 	_RtlGetCurrentPeb = windowsFindfunc(n32, []byte("RtlGetCurrentPeb\000"))
 	_RtlGetNtVersionNumbers = windowsFindfunc(n32, []byte("RtlGetNtVersionNumbers\000"))
 
@@ -955,6 +953,22 @@ func mdestroy(mp *m) {
 	}
 }
 
+// asmstdcall_trampoline calls asmstdcall converting from Go to C calling convention.
+func asmstdcall_trampoline(args unsafe.Pointer)
+
+// stdcall_no_g calls asmstdcall on os stack without using g.
+//
+//go:nosplit
+func stdcall_no_g(fn stdFunction, n int, args uintptr) uintptr {
+	libcall := libcall{
+		fn:   uintptr(unsafe.Pointer(fn)),
+		n:    uintptr(n),
+		args: args,
+	}
+	asmstdcall_trampoline(noescape(unsafe.Pointer(&libcall)))
+	return libcall.r1
+}
+
 // Calling stdcall on os stack.
 // May run during STW, so write barriers are not allowed.
 //
@@ -1053,38 +1067,42 @@ func stdcall7(fn stdFunction, a0, a1, a2, a3, a4, a5, a6 uintptr) uintptr {
 }
 
 // These must run on the system stack only.
-func usleep2(dt int32)
-func switchtothread()
 
 //go:nosplit
 func osyield_no_g() {
-	switchtothread()
+	stdcall_no_g(_SwitchToThread, 0, 0)
 }
 
 //go:nosplit
 func osyield() {
-	systemstack(switchtothread)
+	systemstack(func() {
+		stdcall0(_SwitchToThread)
+	})
 }
 
 //go:nosplit
 func usleep_no_g(us uint32) {
-	dt := -10 * int32(us) // relative sleep (negative), 100ns units
-	usleep2(dt)
+	timeout := uintptr(us) / 1000 // ms units
+	args := [...]uintptr{_INVALID_HANDLE_VALUE, timeout}
+	stdcall_no_g(_WaitForSingleObject, len(args), uintptr(noescape(unsafe.Pointer(&args[0]))))
 }
 
 //go:nosplit
 func usleep(us uint32) {
 	systemstack(func() {
-		dt := -10 * int64(us) // relative sleep (negative), 100ns units
+		var h, timeout uintptr
 		// If the high-res timer is available and its handle has been allocated for this m, use it.
 		// Otherwise fall back to the low-res one, which doesn't need a handle.
 		if haveHighResTimer && getg().m.highResTimer != 0 {
-			h := getg().m.highResTimer
+			h = getg().m.highResTimer
+			dt := -10 * int64(us) // relative sleep (negative), 100ns units
 			stdcall6(_SetWaitableTimer, h, uintptr(unsafe.Pointer(&dt)), 0, 0, 0, 0)
-			stdcall3(_NtWaitForSingleObject, h, 0, 0)
+			timeout = _INFINITE
 		} else {
-			usleep2(int32(dt))
+			h = _INVALID_HANDLE_VALUE
+			timeout = uintptr(us) / 1000 // ms units
 		}
+		stdcall2(_WaitForSingleObject, h, timeout)
 	})
 }
 

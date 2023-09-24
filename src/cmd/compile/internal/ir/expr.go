@@ -186,6 +186,7 @@ type CallExpr struct {
 	miniExpr
 	X         Node
 	Args      Nodes
+	DeferAt   Node
 	RType     Node    `mknode:"-"` // see reflectdata/helpers.go
 	KeepAlive []*Name // vars to be kept alive until call returns
 	IsDDD     bool
@@ -1137,7 +1138,7 @@ func MethodSym(recv *types.Type, msym *types.Sym) *types.Sym {
 	return sym
 }
 
-// MethodSymSuffix is like methodsym, but allows attaching a
+// MethodSymSuffix is like MethodSym, but allows attaching a
 // distinguisher suffix. To avoid collisions, the suffix must not
 // start with a letter, number, or period.
 func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sym {
