@@ -171,6 +171,11 @@ type Config struct {
 	// for unused imports.
 	DisableUnusedImportCheck bool
 
+	// If EnableAlias is set, alias declarations produce an _Alias type.
+	// Otherwise the alias information is only in the type name, which
+	// points directly to the actual (aliased) type.
+	_EnableAlias bool
+
 	// If a non-empty _ErrorURL format string is provided, it is used
 	// to format an error URL link that is appended to the first line
 	// of an error message. ErrorURL must be a format string containing
@@ -286,11 +291,12 @@ type Info struct {
 	// appear in this list.
 	InitOrder []*Initializer
 
-	// _FileVersions maps a file to the file's Go version string.
-	// If the file doesn't specify a version and Config.GoVersion
-	// is not given, the reported version is the empty string.
-	// TODO(gri) should this be "go0.0" instead in that case?
-	_FileVersions map[*ast.File]string
+	// FileVersions maps a file to its Go version string.
+	// If the file doesn't specify a version, the reported
+	// string is Config.GoVersion.
+	// Version strings begin with “go”, like “go1.21”, and
+	// are suitable for use with the [go/version] package.
+	FileVersions map[*ast.File]string
 }
 
 func (info *Info) recordTypes() bool {

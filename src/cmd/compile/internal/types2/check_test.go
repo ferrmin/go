@@ -51,6 +51,7 @@ import (
 var (
 	haltOnError  = flag.Bool("halt", false, "halt on error")
 	verifyErrors = flag.Bool("verify", false, "verify errors (rather than list them) in TestManual")
+	enableAlias  = flag.Bool("alias", false, "set Config._EnableAlias for tests")
 )
 
 func parseFiles(t *testing.T, filenames []string, srcs [][]byte, mode syntax.Mode) ([]*syntax.File, []error) {
@@ -130,6 +131,7 @@ func testFiles(t *testing.T, filenames []string, srcs [][]byte, colDelta uint, m
 	flags.StringVar(&conf.GoVersion, "lang", "", "")
 	flags.StringVar(&goexperiment, "goexperiment", "", "")
 	flags.BoolVar(&conf.FakeImportC, "fakeImportC", false, "")
+	flags.BoolVar(boolFieldAddr(&conf, "_EnableAlias"), "alias", *enableAlias, "")
 	if err := parseFlags(srcs[0], flags); err != nil {
 		t.Fatal(err)
 	}
@@ -368,11 +370,11 @@ func TestIssue47243_TypedRHS(t *testing.T) {
 }
 
 func TestCheck(t *testing.T) {
-	old := buildcfg.Experiment.Range
+	old := buildcfg.Experiment.RangeFunc
 	defer func() {
-		buildcfg.Experiment.Range = old
+		buildcfg.Experiment.RangeFunc = old
 	}()
-	buildcfg.Experiment.Range = true
+	buildcfg.Experiment.RangeFunc = true
 
 	DefPredeclaredTestFuncs()
 	testDirFiles(t, "../../../../internal/types/testdata/check", 50, false) // TODO(gri) narrow column tolerance

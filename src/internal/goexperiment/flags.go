@@ -114,6 +114,13 @@ type Flags struct {
 	// inlining phase within the Go compiler.
 	NewInliner bool
 
+	// RangeFunc enables range over func.
+	RangeFunc bool
+
 	// Range enables range over int and func.
 	Range bool
+
+	// AllocHeaders enables a different, more efficient way for the GC to
+	// manage heap metadata.
+	AllocHeaders bool
 }
