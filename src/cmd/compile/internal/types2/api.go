@@ -170,11 +170,6 @@ type Config struct {
 	// for unused imports.
 	DisableUnusedImportCheck bool
 
-	// If EnableAlias is set, alias declarations produce an _Alias type.
-	// Otherwise the alias information is only in the type name, which
-	// points directly to the actual (aliased) type.
-	_EnableAlias bool
-
 	// If a non-empty ErrorURL format string is provided, it is used
 	// to format an error URL link that is appended to the first line
 	// of an error message. ErrorURL must be a format string containing
@@ -340,6 +335,23 @@ func (info *Info) ObjectOf(id *syntax.Name) Object {
 		return obj
 	}
 	return info.Uses[id]
+}
+
+// PkgNameOf returns the local package name defined by the import,
+// or nil if not found.
+//
+// For dot-imports, the package name is ".".
+//
+// Precondition: the Defs and Implicts maps are populated.
+func (info *Info) PkgNameOf(imp *syntax.ImportDecl) *PkgName {
+	var obj Object
+	if imp.LocalPkgName != nil {
+		obj = info.Defs[imp.LocalPkgName]
+	} else {
+		obj = info.Implicits[imp]
+	}
+	pkgname, _ := obj.(*PkgName)
+	return pkgname
 }
 
 // TypeAndValue reports the type and value (for constants)
