@@ -576,7 +576,10 @@ func switchToCrashStack(fn func()) {
 	abort()
 }
 
-const crashStackImplemented = GOARCH == "amd64" || GOARCH == "arm64" || GOARCH == "mips64" || GOARCH == "mips64le" || GOARCH == "ppc64" || GOARCH == "ppc64le" || GOARCH == "riscv64"
+// Disable crash stack on Windows for now. Apparently, throwing an exception
+// on a non-system-allocated crash stack causes EXCEPTION_STACK_OVERFLOW and
+// hangs the process (see issue 63938).
+const crashStackImplemented = (GOARCH == "amd64" || GOARCH == "arm64" || GOARCH == "mips64" || GOARCH == "mips64le" || GOARCH == "ppc64" || GOARCH == "ppc64le" || GOARCH == "riscv64" || GOARCH == "wasm") && GOOS != "windows"
 
 //go:noescape
 func switchToCrashStack0(fn func()) // in assembly
@@ -4404,10 +4407,21 @@ func entersyscall_gcwait() {
 	if sched.stopwait > 0 && atomic.Cas(&pp.status, _Psyscall, _Pgcstop) {
 		trace := traceAcquire()
 		if trace.ok() {
-			trace.GoSysBlock(pp)
-			// N.B. ProcSteal not necessary because if we succeed we're
-			// always stopping the P we just put into the syscall status.
-			trace.ProcStop(pp)
+			if goexperiment.ExecTracer2 {
+				// This is a steal in the new tracer. While it's very likely
+				// that we were the ones to put this P into _Psyscall, between
+				// then and now it's totally possible it had been stolen and
+				// then put back into _Psyscall for us to acquire here. In such
+				// case ProcStop would be incorrect.
+				//
+				// TODO(mknyszek): Consider emitting a ProcStop instead when
+				// gp.m.syscalltick == pp.syscalltick, since then we know we never
+				// lost the P.
+				trace.ProcSteal(pp, true)
+			} else {
+				trace.GoSysBlock(pp)
+				trace.ProcStop(pp)
+			}
 			traceRelease(trace)
 		}
 		pp.syscalltick++
