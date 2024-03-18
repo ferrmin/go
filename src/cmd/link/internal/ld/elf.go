@@ -1113,7 +1113,6 @@ func elfphload(seg *sym.Segment) *ElfPhdr {
 func elfphrelro(seg *sym.Segment) {
 	ph := newElfPhdr()
 	ph.Type = elf.PT_GNU_RELRO
-	ph.Flags = elf.PF_R
 	ph.Vaddr = seg.Vaddr
 	ph.Paddr = seg.Vaddr
 	ph.Memsz = seg.Length
@@ -1563,11 +1562,7 @@ func (ctxt *Link) doelf() {
 
 		/* global offset table */
 		got := ldr.CreateSymForUpdate(".got", 0)
-		if ctxt.UseRelro() {
-			got.SetType(sym.SRODATARELRO)
-		} else {
-			got.SetType(sym.SELFGOT) // writable
-		}
+		got.SetType(sym.SELFGOT) // writable
 
 		/* ppc64 glink resolver */
 		if ctxt.IsPPC64() {
@@ -1580,11 +1575,7 @@ func (ctxt *Link) doelf() {
 		hash.SetType(sym.SELFROSECT)
 
 		gotplt := ldr.CreateSymForUpdate(".got.plt", 0)
-		if ctxt.UseRelro() && *flagBindNow {
-			gotplt.SetType(sym.SRODATARELRO)
-		} else {
-			gotplt.SetType(sym.SELFSECT) // writable
-		}
+		gotplt.SetType(sym.SELFSECT) // writable
 
 		plt := ldr.CreateSymForUpdate(".plt", 0)
 		if ctxt.IsPPC64() {
@@ -1606,12 +1597,9 @@ func (ctxt *Link) doelf() {
 
 		/* define dynamic elf table */
 		dynamic := ldr.CreateSymForUpdate(".dynamic", 0)
-		switch {
-		case thearch.ELF.DynamicReadOnly:
+		if thearch.ELF.DynamicReadOnly {
 			dynamic.SetType(sym.SELFROSECT)
-		case ctxt.UseRelro():
-			dynamic.SetType(sym.SRODATARELRO)
-		default:
+		} else {
 			dynamic.SetType(sym.SELFSECT)
 		}
 
