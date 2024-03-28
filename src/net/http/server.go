@@ -23,7 +23,7 @@ import (
 	urlpkg "net/url"
 	"path"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1922,12 +1922,15 @@ func (c *conn) serve(ctx context.Context) {
 			// If the handshake failed due to the client not speaking
 			// TLS, assume they're speaking plaintext HTTP and write a
 			// 400 response on the TLS conn's underlying net.Conn.
+			var reason string
 			if re, ok := err.(tls.RecordHeaderError); ok && re.Conn != nil && tlsRecordHeaderLooksLikeHTTP(re.RecordHeader) {
 				io.WriteString(re.Conn, "HTTP/1.0 400 Bad Request\r\n\r\nClient sent an HTTP request to an HTTPS server.\n")
 				re.Conn.Close()
-				return
+				reason = "client sent an HTTP request to an HTTPS server"
+			} else {
+				reason = err.Error()
 			}
-			c.server.logf("http: TLS handshake error from %s: %v", c.rwc.RemoteAddr(), err)
+			c.server.logf("http: TLS handshake error from %s: %v", c.rwc.RemoteAddr(), reason)
 			return
 		}
 		// Restore Conn-level deadlines.
@@ -2652,7 +2655,7 @@ func (mux *ServeMux) matchingMethods(host, path string) []string {
 	// matchOrRedirect will try appending a trailing slash if there is no match.
 	mux.tree.matchingMethods(host, path+"/", ms)
 	methods := mapKeys(ms)
-	sort.Strings(methods)
+	slices.Sort(methods)
 	return methods
 }
 
@@ -3206,7 +3209,7 @@ func (srv *Server) shouldConfigureHTTP2ForServe() bool {
 	// passed this tls.Config to tls.NewListener. And if they did,
 	// it's too late anyway to fix it. It would only be potentially racy.
 	// See Issue 15908.
-	return strSliceContains(srv.TLSConfig.NextProtos, http2NextProtoTLS)
+	return slices.Contains(srv.TLSConfig.NextProtos, http2NextProtoTLS)
 }
 
 // ErrServerClosed is returned by the [Server.Serve], [ServeTLS], [ListenAndServe],
@@ -3308,7 +3311,7 @@ func (srv *Server) ServeTLS(l net.Listener, certFile, keyFile string) error {
 	}
 
 	config := cloneTLSConfig(srv.TLSConfig)
-	if !strSliceContains(config.NextProtos, "http/1.1") {
+	if !slices.Contains(config.NextProtos, "http/1.1") {
 		config.NextProtos = append(config.NextProtos, "http/1.1")
 	}
 
@@ -3813,15 +3816,6 @@ func numLeadingCRorLF(v []byte) (n int) {
 		break
 	}
 	return
-}
-
-func strSliceContains(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // tlsRecordHeaderLooksLikeHTTP reports whether a TLS record header

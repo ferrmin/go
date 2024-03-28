@@ -8,7 +8,7 @@ package runtime
 
 import (
 	"internal/abi"
-	"runtime/internal/atomic"
+	"internal/runtime/atomic"
 	"runtime/internal/sys"
 	"unsafe"
 )
@@ -776,6 +776,11 @@ func (ts *timers) adjust(now int64, force bool) {
 		t := ts.heap[i]
 		if t.ts != ts {
 			throw("bad ts")
+		}
+
+		if t.astate.Load()&(timerModified|timerZombie) == 0 {
+			// Does not need adjustment.
+			continue
 		}
 
 		t.lock()
