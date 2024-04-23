@@ -1067,7 +1067,7 @@ func casfrom_Gscanstatus(gp *g, oldval, newval uint32) {
 		dumpgstatus(gp)
 		throw("casfrom_Gscanstatus: gp->status is not in scan state")
 	}
-	releaseLockRank(lockRankGscan)
+	releaseLockRankAndM(lockRankGscan)
 }
 
 // This will return false if the gp is not in the expected status and the cas fails.
@@ -1081,7 +1081,7 @@ func castogscanstatus(gp *g, oldval, newval uint32) bool {
 		if newval == oldval|_Gscan {
 			r := gp.atomicstatus.CompareAndSwap(oldval, newval)
 			if r {
-				acquireLockRank(lockRankGscan)
+				acquireLockRankAndM(lockRankGscan)
 			}
 			return r
 
@@ -1105,13 +1105,14 @@ var casgstatusAlwaysTrack = false
 func casgstatus(gp *g, oldval, newval uint32) {
 	if (oldval&_Gscan != 0) || (newval&_Gscan != 0) || oldval == newval {
 		systemstack(func() {
+			// Call on the systemstack to prevent print and throw from counting
+			// against the nosplit stack reservation.
 			print("runtime: casgstatus: oldval=", hex(oldval), " newval=", hex(newval), "\n")
 			throw("casgstatus: bad incoming values")
 		})
 	}
 
-	acquireLockRank(lockRankGscan)
-	releaseLockRank(lockRankGscan)
+	lockWithRankMayAcquire(nil, lockRankGscan)
 
 	// See https://golang.org/cl/21503 for justification of the yield delay.
 	const yieldDelay = 5 * 1000
@@ -1121,7 +1122,11 @@ func casgstatus(gp *g, oldval, newval uint32) {
 	// GC time to finish and change the state to oldval.
 	for i := 0; !gp.atomicstatus.CompareAndSwap(oldval, newval); i++ {
 		if oldval == _Gwaiting && gp.atomicstatus.Load() == _Grunnable {
-			throw("casgstatus: waiting for Gwaiting but is Grunnable")
+			systemstack(func() {
+				// Call on the systemstack to prevent throw from counting
+				// against the nosplit stack reservation.
+				throw("casgstatus: waiting for Gwaiting but is Grunnable")
+			})
 		}
 		if i == 0 {
 			nextYield = nanotime() + yieldDelay
@@ -1245,7 +1250,7 @@ func casGToPreemptScan(gp *g, old, new uint32) {
 	if old != _Grunning || new != _Gscan|_Gpreempted {
 		throw("bad g transition")
 	}
-	acquireLockRank(lockRankGscan)
+	acquireLockRankAndM(lockRankGscan)
 	for !gp.atomicstatus.CompareAndSwap(_Grunning, _Gscan|_Gpreempted) {
 	}
 }
@@ -4237,7 +4242,7 @@ func gdestroy(gp *g) {
 //
 //go:nosplit
 //go:nowritebarrierrec
-func save(pc, sp uintptr) {
+func save(pc, sp, bp uintptr) {
 	gp := getg()
 
 	if gp == gp.m.g0 || gp == gp.m.gsignal {
@@ -4253,6 +4258,7 @@ func save(pc, sp uintptr) {
 	gp.sched.sp = sp
 	gp.sched.lr = 0
 	gp.sched.ret = 0
+	gp.sched.bp = bp
 	// We need to ensure ctxt is zero, but can't have a write
 	// barrier here. However, it should always already be zero.
 	// Assert that.
@@ -4285,7 +4291,7 @@ func save(pc, sp uintptr) {
 // entry point for syscalls, which obtains the SP and PC from the caller.
 //
 //go:nosplit
-func reentersyscall(pc, sp uintptr) {
+func reentersyscall(pc, sp, bp uintptr) {
 	trace := traceAcquire()
 	gp := getg()
 
@@ -4301,14 +4307,15 @@ func reentersyscall(pc, sp uintptr) {
 	gp.throwsplit = true
 
 	// Leave SP around for GC and traceback.
-	save(pc, sp)
+	save(pc, sp, bp)
 	gp.syscallsp = sp
 	gp.syscallpc = pc
+	gp.syscallbp = bp
 	casgstatus(gp, _Grunning, _Gsyscall)
 	if staticLockRanking {
 		// When doing static lock ranking casgstatus can call
 		// systemstack which clobbers g.sched.
-		save(pc, sp)
+		save(pc, sp, bp)
 	}
 	if gp.syscallsp < gp.stack.lo || gp.stack.hi < gp.syscallsp {
 		systemstack(func() {
@@ -4325,18 +4332,18 @@ func reentersyscall(pc, sp uintptr) {
 		// systemstack itself clobbers g.sched.{pc,sp} and we might
 		// need them later when the G is genuinely blocked in a
 		// syscall
-		save(pc, sp)
+		save(pc, sp, bp)
 	}
 
 	if sched.sysmonwait.Load() {
 		systemstack(entersyscall_sysmon)
-		save(pc, sp)
+		save(pc, sp, bp)
 	}
 
 	if gp.m.p.ptr().runSafePointFn != 0 {
 		// runSafePointFn may stack split if run on this stack
 		systemstack(runSafePointFn)
-		save(pc, sp)
+		save(pc, sp, bp)
 	}
 
 	gp.m.syscalltick = gp.m.p.ptr().syscalltick
@@ -4347,7 +4354,7 @@ func reentersyscall(pc, sp uintptr) {
 	atomic.Store(&pp.status, _Psyscall)
 	if sched.gcwaiting.Load() {
 		systemstack(entersyscall_gcwait)
-		save(pc, sp)
+		save(pc, sp, bp)
 	}
 
 	gp.m.locks--
@@ -4360,7 +4367,12 @@ func reentersyscall(pc, sp uintptr) {
 //go:nosplit
 //go:linkname entersyscall
 func entersyscall() {
-	reentersyscall(getcallerpc(), getcallersp())
+	// N.B. getcallerfp cannot be written directly as argument in the call
+	// to reentersyscall because it forces spilling the other arguments to
+	// the stack. This results in exceeding the nosplit stack requirements
+	// on some platforms.
+	fp := getcallerfp()
+	reentersyscall(getcallerpc(), getcallersp(), fp)
 }
 
 func entersyscall_sysmon() {
@@ -4418,9 +4430,11 @@ func entersyscallblock() {
 	// Leave SP around for GC and traceback.
 	pc := getcallerpc()
 	sp := getcallersp()
-	save(pc, sp)
+	bp := getcallerfp()
+	save(pc, sp, bp)
 	gp.syscallsp = gp.sched.sp
 	gp.syscallpc = gp.sched.pc
+	gp.syscallbp = gp.sched.bp
 	if gp.syscallsp < gp.stack.lo || gp.stack.hi < gp.syscallsp {
 		sp1 := sp
 		sp2 := gp.sched.sp
@@ -4441,7 +4455,7 @@ func entersyscallblock() {
 	systemstack(entersyscallblock_handoff)
 
 	// Resave for traceback during blocked call.
-	save(getcallerpc(), getcallersp())
+	save(getcallerpc(), getcallersp(), getcallerfp())
 
 	gp.m.locks--
 }
@@ -6016,8 +6030,8 @@ func sysmon() {
 
 type sysmontick struct {
 	schedtick   uint32
-	schedwhen   int64
 	syscalltick uint32
+	schedwhen   int64
 	syscallwhen int64
 }
 
@@ -6934,6 +6948,18 @@ func sync_atomic_runtime_procPin() int {
 //go:linkname sync_atomic_runtime_procUnpin sync/atomic.runtime_procUnpin
 //go:nosplit
 func sync_atomic_runtime_procUnpin() {
+	procUnpin()
+}
+
+//go:linkname internal_weak_runtime_procPin internal/weak.runtime_procPin
+//go:nosplit
+func internal_weak_runtime_procPin() int {
+	return procPin()
+}
+
+//go:linkname internal_weak_runtime_procUnpin internal/weak.runtime_procUnpin
+//go:nosplit
+func internal_weak_runtime_procUnpin() {
 	procUnpin()
 }
 
