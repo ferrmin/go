@@ -67,6 +67,7 @@ var depsRules = `
 	internal/goos
 	< internal/bytealg
 	< internal/stringslite
+	< internal/byteorder
 	< internal/itoa
 	< internal/unsafeheader
 	< runtime/internal/sys
@@ -90,7 +91,7 @@ var depsRules = `
 
 	# slices depends on unsafe for overlapping check, cmp for comparison
 	# semantics, and math/bits for # calculating bitlength of numbers.
-	unsafe, cmp, math/bits
+	RUNTIME, unsafe, cmp, math/bits
 	< slices;
 
 	RUNTIME, slices
