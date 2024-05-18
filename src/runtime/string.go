@@ -312,7 +312,7 @@ func gobytes(p *byte, n int) (b []byte) {
 	return
 }
 
-// This is exported via linkname to assembly in syscall (for Plan9).
+// This is exported via linkname to assembly in syscall (for Plan9) and cgo.
 //
 //go:linkname gostring
 func gostring(p *byte) string {
@@ -339,14 +339,6 @@ func gostringn(p *byte, l int) string {
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
 	return s
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func hasSuffix(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }
 
 const (

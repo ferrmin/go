@@ -8,6 +8,7 @@ import (
 	"internal/abi"
 	"internal/goarch"
 	"internal/runtime/atomic"
+	"internal/stringslite"
 	"runtime/internal/sys"
 	"unsafe"
 )
@@ -53,7 +54,7 @@ const (
 // pc should be the program counter of the compiler-generated code that
 // triggered this panic.
 func panicCheck1(pc uintptr, msg string) {
-	if goarch.IsWasm == 0 && hasPrefix(funcname(findfunc(pc)), "runtime.") {
+	if goarch.IsWasm == 0 && stringslite.HasPrefix(funcname(findfunc(pc)), "runtime.") {
 		// Note: wasm can't tail call, so we can't get the original caller's pc.
 		throw(msg)
 	}
@@ -1014,13 +1015,12 @@ func sync_fatal(s string) {
 // issue #67274, so as to fix longtest builders.
 //
 //go:nosplit
-//go:noinline
 func throw(s string) {
 	// Everything throw does should be recursively nosplit so it
 	// can be called even when it's unsafe to grow the stack.
 	systemstack(func() {
 		print("fatal error: ")
-		printpanicval(s)
+		printindented(s) // logically printpanicval(s), but avoids convTstring write barrier
 		print("\n")
 	})
 
@@ -1041,7 +1041,7 @@ func fatal(s string) {
 	// can be called even when it's unsafe to grow the stack.
 	systemstack(func() {
 		print("fatal error: ")
-		printpanicval(s)
+		printindented(s) // logically printpanicval(s), but avoids convTstring write barrier
 		print("\n")
 	})
 
