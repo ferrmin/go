@@ -13,6 +13,7 @@ package oldtrace
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"internal/trace/version"
 	"io"
 	"math"
+	"slices"
 	"sort"
 )
 
@@ -165,7 +167,7 @@ func newParser(r io.Reader, ver version.Version) (*parser, error) {
 // be the version of the trace. This can be achieved by using
 // version.ReadHeader.
 func Parse(r io.Reader, vers version.Version) (Trace, error) {
-	// We accept the version as an argument because internal/trace/v2 will have
+	// We accept the version as an argument because internal/trace will have
 	// already read the version to determine which parser to use.
 	p, err := newParser(r, vers)
 	if err != nil {
@@ -368,7 +370,9 @@ func (p *parser) parseEventBatches() (Events, error) {
 	// with original timestamps corresponding to when ReadTrace pulled the data
 	// off of the profBuf queue. Re-sort them by the timestamp we captured
 	// inside the signal handler.
-	sort.Sort((*eventList)(&p.cpuSamples))
+	slices.SortFunc(p.cpuSamples, func(a, b Event) int {
+		return cmp.Compare(a.Ts, b.Ts)
+	})
 
 	allProcs := make([]proc, 0, len(p.batchOffsets))
 	for pid := range p.batchOffsets {
