@@ -1,14 +1,5 @@
 <!-- These items need to be completed and moved to an appropriate location in the release notes. -->
 
-<!-- go.dev/issue/61405, CL 557835, CL 584596 -->
-TODO: Document that range-over-func is enabled (and that GOEXPERIMENT=rangefunc is relevant) in Go 1.23. This note should be moved to an appropriate location in the release notes.
-
-<!-- go.dev/issue/60905, CL 559555 -->
-TODO: The new `GOARM64` environment variable needs to be documented. This note should be moved to an appropriate location in the release notes.
-
-<!-- go.dev/issue/61476, CL 541135 -->
-TODO: The new `GORISCV64` environment variable needs to be documented. This note should be moved to an appropriate location in the release notes.
-
 <!-- These items need to be reviewed, and mentioned in the Go 1.23 release notes if applicable.
 
 None right now; more may come up later on.
