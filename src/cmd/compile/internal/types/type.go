@@ -392,7 +392,7 @@ type ChanArgs struct {
 	T *Type // reference to a chan type whose elements need a width check
 }
 
-// // FuncArgs contains Type fields specific to TFUNCARGS types.
+// FuncArgs contains Type fields specific to TFUNCARGS types.
 type FuncArgs struct {
 	T *Type // reference to a func type whose elements need a width check
 }
@@ -1650,7 +1650,7 @@ func NewNamed(obj Object) *Type {
 		t.SetIsShape(true)
 		t.SetHasShape(true)
 	}
-	if sym.Pkg.Path == "runtime/internal/sys" && sym.Name == "nih" {
+	if sym.Pkg.Path == "internal/runtime/sys" && sym.Name == "nih" {
 		// Recognize the special not-in-heap type. Any type including
 		// this type will also be not-in-heap.
 		// This logic is duplicated in go/types and
