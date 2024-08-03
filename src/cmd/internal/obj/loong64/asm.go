@@ -1028,6 +1028,8 @@ func buildop(ctxt *obj.Link) {
 			opset(ATRUNCFW, r0)
 			opset(ASQRTF, r0)
 			opset(ASQRTD, r0)
+			opset(AFCLASSF, r0)
+			opset(AFCLASSD, r0)
 
 		case AMOVVF:
 			opset(AMOVVD, r0)
@@ -1035,6 +1037,30 @@ func buildop(ctxt *obj.Link) {
 			opset(AMOVDV, r0)
 			opset(ATRUNCDV, r0)
 			opset(ATRUNCFV, r0)
+			opset(AFFINTFW, r0)
+			opset(AFFINTFV, r0)
+			opset(AFFINTDW, r0)
+			opset(AFFINTDV, r0)
+			opset(AFTINTWF, r0)
+			opset(AFTINTWD, r0)
+			opset(AFTINTVF, r0)
+			opset(AFTINTVD, r0)
+			opset(AFTINTRPWF, r0)
+			opset(AFTINTRPWD, r0)
+			opset(AFTINTRPVF, r0)
+			opset(AFTINTRPVD, r0)
+			opset(AFTINTRMWF, r0)
+			opset(AFTINTRMWD, r0)
+			opset(AFTINTRMVF, r0)
+			opset(AFTINTRMVD, r0)
+			opset(AFTINTRZWF, r0)
+			opset(AFTINTRZWD, r0)
+			opset(AFTINTRZVF, r0)
+			opset(AFTINTRZVD, r0)
+			opset(AFTINTRNEWF, r0)
+			opset(AFTINTRNEWD, r0)
+			opset(AFTINTRNEVF, r0)
+			opset(AFTINTRNEVD, r0)
 
 		case AADD:
 			opset(ASGT, r0)
@@ -1052,6 +1078,12 @@ func buildop(ctxt *obj.Link) {
 			opset(ASUBF, r0)
 			opset(ASUBD, r0)
 			opset(AADDD, r0)
+			opset(AFMINF, r0)
+			opset(AFMIND, r0)
+			opset(AFMAXF, r0)
+			opset(AFMAXD, r0)
+			opset(AFCOPYSGF, r0)
+			opset(AFCOPYSGD, r0)
 
 		case AAND:
 			opset(AOR, r0)
@@ -1872,6 +1904,18 @@ func (c *ctxt0) oprrr(a obj.As) uint32 {
 		return 0x0c2<<20 | 0x3<<15 // FCMP.SLT.D
 	case ACMPGTF:
 		return 0x0c1<<20 | 0x3<<15 // FCMP.SLT.S
+	case AFMINF:
+		return 0x215 << 15 // fmin.s
+	case AFMIND:
+		return 0x216 << 15 // fmin.d
+	case AFMAXF:
+		return 0x211 << 15 // fmax.s
+	case AFMAXD:
+		return 0x212 << 15 // fmax.d
+	case AFCOPYSGF:
+		return 0x225 << 15 // fcopysign.s
+	case AFCOPYSGD:
+		return 0x226 << 15 // fcopysign.d
 	}
 
 	if a < 0 {
@@ -1940,6 +1984,58 @@ func (c *ctxt0) oprr(a obj.As) uint32 {
 		return 0x4511 << 10
 	case ASQRTD:
 		return 0x4512 << 10
+	case AFCLASSF:
+		return 0x450d << 10 // fclass.s
+	case AFCLASSD:
+		return 0x450e << 10 // fclass.d
+	case AFFINTFW:
+		return 0x4744 << 10 // ffint.s.w
+	case AFFINTFV:
+		return 0x4746 << 10 // ffint.s.l
+	case AFFINTDW:
+		return 0x4748 << 10 // ffint.d.w
+	case AFFINTDV:
+		return 0x474a << 10 // ffint.d.l
+	case AFTINTWF:
+		return 0x46c1 << 10 // ftint.w.s
+	case AFTINTWD:
+		return 0x46c2 << 10 // ftint.w.d
+	case AFTINTVF:
+		return 0x46c9 << 10 // ftint.l.s
+	case AFTINTVD:
+		return 0x46ca << 10 // ftint.l.d
+	case AFTINTRMWF:
+		return 0x4681 << 10 // ftintrm.w.s
+	case AFTINTRMWD:
+		return 0x4682 << 10 // ftintrm.w.d
+	case AFTINTRMVF:
+		return 0x4689 << 10 // ftintrm.l.s
+	case AFTINTRMVD:
+		return 0x468a << 10 // ftintrm.l.d
+	case AFTINTRPWF:
+		return 0x4691 << 10 // ftintrp.w.s
+	case AFTINTRPWD:
+		return 0x4692 << 10 // ftintrp.w.d
+	case AFTINTRPVF:
+		return 0x4699 << 10 // ftintrp.l.s
+	case AFTINTRPVD:
+		return 0x469a << 10 // ftintrp.l.d
+	case AFTINTRZWF:
+		return 0x46a1 << 10 // ftintrz.w.s
+	case AFTINTRZWD:
+		return 0x46a2 << 10 // ftintrz.w.d
+	case AFTINTRZVF:
+		return 0x46a9 << 10 // ftintrz.l.s
+	case AFTINTRZVD:
+		return 0x46aa << 10 // ftintrz.l.d
+	case AFTINTRNEWF:
+		return 0x46b1 << 10 // ftintrne.w.s
+	case AFTINTRNEWD:
+		return 0x46b2 << 10 // ftintrne.w.d
+	case AFTINTRNEVF:
+		return 0x46b9 << 10 // ftintrne.l.s
+	case AFTINTRNEVD:
+		return 0x46ba << 10 // ftintrne.l.d
 	}
 
 	c.ctxt.Diag("bad rr opcode %v", a)
