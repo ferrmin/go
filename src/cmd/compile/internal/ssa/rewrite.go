@@ -1188,6 +1188,8 @@ func logRule(s string) {
 
 var ruleFile io.Writer
 
+// TODO: replace these with the built-in min/max once they are available
+// during bootstrap (when bootstrapping with 1.21 or later).
 func min(x, y int64) int64 {
 	if x < y {
 		return x
@@ -1200,6 +1202,18 @@ func max(x, y int64) int64 {
 	}
 	return y
 }
+func minU(x, y uint64) uint64 {
+	if x < y {
+		return x
+	}
+	return y
+}
+func maxU(x, y uint64) uint64 {
+	if x > y {
+		return x
+	}
+	return y
+}
 
 func isConstZero(v *Value) bool {
 	switch v.Op {
@@ -1207,6 +1221,12 @@ func isConstZero(v *Value) bool {
 		return true
 	case OpConst64, OpConst32, OpConst16, OpConst8, OpConstBool, OpConst32F, OpConst64F:
 		return v.AuxInt == 0
+	case OpStringMake, OpIMake, OpComplexMake:
+		return isConstZero(v.Args[0]) && isConstZero(v.Args[1])
+	case OpSliceMake:
+		return isConstZero(v.Args[0]) && isConstZero(v.Args[1]) && isConstZero(v.Args[2])
+	case OpStringPtr, OpStringLen, OpSlicePtr, OpSliceLen, OpSliceCap, OpITab, OpIData, OpComplexReal, OpComplexImag:
+		return isConstZero(v.Args[0])
 	}
 	return false
 }
@@ -2325,4 +2345,59 @@ func isARM64addcon(v int64) bool {
 func setPos(v *Value, pos src.XPos) bool {
 	v.Pos = pos
 	return true
+}
+
+// isNonNegative reports whether v is known to be greater or equal to zero.
+// Note that this is pretty simplistic. The prove pass generates more detailed
+// nonnegative information about values.
+func isNonNegative(v *Value) bool {
+	if !v.Type.IsInteger() {
+		v.Fatalf("isNonNegative bad type: %v", v.Type)
+	}
+	// TODO: return true if !v.Type.IsSigned()
+	// SSA isn't type-safe enough to do that now (issue 37753).
+	// The checks below depend only on the pattern of bits.
+
+	switch v.Op {
+	case OpConst64:
+		return v.AuxInt >= 0
+
+	case OpConst32:
+		return int32(v.AuxInt) >= 0
+
+	case OpConst16:
+		return int16(v.AuxInt) >= 0
+
+	case OpConst8:
+		return int8(v.AuxInt) >= 0
+
+	case OpStringLen, OpSliceLen, OpSliceCap,
+		OpZeroExt8to64, OpZeroExt16to64, OpZeroExt32to64,
+		OpZeroExt8to32, OpZeroExt16to32, OpZeroExt8to16,
+		OpCtz64, OpCtz32, OpCtz16, OpCtz8,
+		OpCtz64NonZero, OpCtz32NonZero, OpCtz16NonZero, OpCtz8NonZero,
+		OpBitLen64, OpBitLen32, OpBitLen16, OpBitLen8:
+		return true
+
+	case OpRsh64Ux64, OpRsh32Ux64:
+		by := v.Args[1]
+		return by.Op == OpConst64 && by.AuxInt > 0
+
+	case OpRsh64x64, OpRsh32x64, OpRsh8x64, OpRsh16x64, OpRsh32x32, OpRsh64x32,
+		OpSignExt32to64, OpSignExt16to64, OpSignExt8to64, OpSignExt16to32, OpSignExt8to32:
+		return isNonNegative(v.Args[0])
+
+	case OpAnd64, OpAnd32, OpAnd16, OpAnd8:
+		return isNonNegative(v.Args[0]) || isNonNegative(v.Args[1])
+
+	case OpMod64, OpMod32, OpMod16, OpMod8,
+		OpDiv64, OpDiv32, OpDiv16, OpDiv8,
+		OpOr64, OpOr32, OpOr16, OpOr8,
+		OpXor64, OpXor32, OpXor16, OpXor8:
+		return isNonNegative(v.Args[0]) && isNonNegative(v.Args[1])
+
+		// We could handle OpPhi here, but the improvements from doing
+		// so are very minor, and it is neither simple nor cheap.
+	}
+	return false
 }
