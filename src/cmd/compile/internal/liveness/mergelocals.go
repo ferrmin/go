@@ -682,7 +682,7 @@ func nextRegion(cands []*ir.Name, idx int) int {
 // given subrange of cands described by st and en (indices into our
 // candidate var list), where the variables within this range have
 // already been determined to be compatible with respect to type,
-// size, etc. Overlapping is done in a a greedy fashion: we select the
+// size, etc. Overlapping is done in a greedy fashion: we select the
 // first element in the st->en range, then walk the rest of the
 // elements adding in vars whose lifetimes don't overlap with the
 // first element, then repeat the process until we run out of work.
@@ -952,7 +952,7 @@ func (cs *cstate) computeIntervals() {
 		//
 		// Note the SPanchored: this ensures that the scheduler won't
 		// move the MOVDaddr earlier than the vardef. With a variable
-		// "xyz" that has no pointers, howver, if we start with
+		// "xyz" that has no pointers, however, if we start with
 		//
 		//    v66 = VarDef <mem> {t2} v65
 		//    v67 = LocalAddr <*T> {t2} v2 v66

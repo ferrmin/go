@@ -134,8 +134,8 @@ func (s *_TypeSet) underIs(f func(Type) bool) bool {
 	}
 	for _, t := range s.terms {
 		assert(t.typ != nil)
-		// x == under(x) for ~x terms
-		u := t.typ
+		// Unalias(x) == under(x) for ~x terms
+		u := Unalias(t.typ)
 		if !t.tilde {
 			u = under(u)
 		}
@@ -166,7 +166,7 @@ func computeInterfaceTypeSet(check *Checker, pos token.Pos, ityp *Interface) *_T
 	// let any follow-on errors play out.
 	//
 	// TODO(gri) Consider recording when this happens and reporting
-	// it as an error (but only if there were no other errors so to
+	// it as an error (but only if there were no other errors so
 	// to not have unnecessary follow-on errors).
 	if !ityp.complete {
 		return &topTypeSet
