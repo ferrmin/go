@@ -96,8 +96,13 @@ type pkgWriter struct {
 // newPkgWriter returns an initialized pkgWriter for the specified
 // package.
 func newPkgWriter(m posMap, pkg *types2.Package, info *types2.Info, otherInfo map[*syntax.FuncLit]bool) *pkgWriter {
+	// Use V2 as the encoded version aliastypeparams GOEXPERIMENT is enabled.
+	version := pkgbits.V1
+	if buildcfg.Experiment.AliasTypeParams {
+		version = pkgbits.V2
+	}
 	return &pkgWriter{
-		PkgEncoder: pkgbits.NewPkgEncoder(base.Debug.SyncFrames),
+		PkgEncoder: pkgbits.NewPkgEncoder(version, base.Debug.SyncFrames),
 
 		m:                     m,
 		curpkg:                pkg,
@@ -236,8 +241,7 @@ func (dict *writerDict) typeParamIndex(typ *types2.TypeParam) int {
 
 // A derivedInfo represents a reference to an encoded generic Go type.
 type derivedInfo struct {
-	idx    index
-	needed bool // TODO(mdempsky): Remove.
+	idx index
 }
 
 // A typeInfo represents a reference to an encoded Go type.
@@ -865,8 +869,7 @@ func (w *writer) doObj(wext *writer, obj types2.Object) pkgbits.CodeObj {
 			if w.Version().Has(pkgbits.AliasTypeParamNames) {
 				w.typeParamNames(tparams)
 			}
-			// TODO(taking): enable this assertion once this is not intended to be a nop.
-			// assert(w.Version().Has(pkgbits.AliasTypeParamNames) || tparams.Len() == 0)
+			assert(w.Version().Has(pkgbits.AliasTypeParamNames) || tparams.Len() == 0)
 			w.typ(rhs)
 			return pkgbits.ObjAlias
 		}
@@ -915,7 +918,9 @@ func (w *writer) objDict(obj types2.Object, dict *writerDict) {
 	w.Len(nderived)
 	for _, typ := range dict.derived {
 		w.Reloc(pkgbits.RelocType, typ.idx)
-		w.Bool(typ.needed)
+		if w.Version().Has(pkgbits.DerivedInfoNeeded) {
+			w.Bool(false)
+		}
 	}
 
 	// Write runtime dictionary information.

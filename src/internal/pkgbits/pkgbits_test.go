@@ -11,19 +11,25 @@ import (
 )
 
 func TestRoundTrip(t *testing.T) {
-	pw := pkgbits.NewPkgEncoder(-1)
-	w := pw.NewEncoder(pkgbits.RelocMeta, pkgbits.SyncPublic)
-	w.Flush()
+	for _, version := range []pkgbits.Version{
+		pkgbits.V0,
+		pkgbits.V1,
+		pkgbits.V2,
+	} {
+		pw := pkgbits.NewPkgEncoder(version, -1)
+		w := pw.NewEncoder(pkgbits.RelocMeta, pkgbits.SyncPublic)
+		w.Flush()
 
-	var b strings.Builder
-	_ = pw.DumpTo(&b)
-	input := b.String()
+		var b strings.Builder
+		_ = pw.DumpTo(&b)
+		input := b.String()
 
-	pr := pkgbits.NewPkgDecoder("package_id", input)
-	r := pr.NewDecoder(pkgbits.RelocMeta, pkgbits.PublicRootIdx, pkgbits.SyncPublic)
+		pr := pkgbits.NewPkgDecoder("package_id", input)
+		r := pr.NewDecoder(pkgbits.RelocMeta, pkgbits.PublicRootIdx, pkgbits.SyncPublic)
 
-	if r.Version() != w.Version() {
-		t.Errorf("Expected reader version %q to be the writer version %q", r.Version(), w.Version())
+		if r.Version() != w.Version() {
+			t.Errorf("Expected reader version %q to be the writer version %q", r.Version(), w.Version())
+		}
 	}
 }
 
@@ -45,6 +51,8 @@ func TestVersions(t *testing.T) {
 		{pkgbits.V1, pkgbits.HasInit},
 		{pkgbits.V0, pkgbits.DerivedFuncInstance},
 		{pkgbits.V1, pkgbits.DerivedFuncInstance},
+		{pkgbits.V0, pkgbits.DerivedInfoNeeded},
+		{pkgbits.V1, pkgbits.DerivedInfoNeeded},
 		{pkgbits.V2, pkgbits.AliasTypeParamNames},
 	} {
 		if !c.v.Has(c.f) {
@@ -57,6 +65,7 @@ func TestVersions(t *testing.T) {
 		{pkgbits.V0, pkgbits.Flags},
 		{pkgbits.V2, pkgbits.HasInit},
 		{pkgbits.V2, pkgbits.DerivedFuncInstance},
+		{pkgbits.V2, pkgbits.DerivedInfoNeeded},
 		{pkgbits.V0, pkgbits.AliasTypeParamNames},
 		{pkgbits.V1, pkgbits.AliasTypeParamNames},
 	} {
