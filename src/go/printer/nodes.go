@@ -380,7 +380,7 @@ func (p *printer) parameters(fields *ast.FieldList, mode paramMode) {
 		if closing := p.lineFor(fields.Closing); 0 < prevLine && prevLine < closing {
 			p.print(token.COMMA)
 			p.linebreak(closing, 0, ignore, true)
-		} else if mode == typeTParam && fields.NumFields() == 1 && combinesWithName(fields.List[0].Type) {
+		} else if mode == typeTParam && fields.NumFields() == 1 && combinesWithName(stripParensAlways(fields.List[0].Type)) {
 			// A type parameter list [P T] where the name P and the type expression T syntactically
 			// combine to another valid (value) expression requires a trailing comma, as in [P *T,]
 			// (or an enclosing interface as in [P interface(*T)]), so that the type parameter list
@@ -411,7 +411,7 @@ func combinesWithName(x ast.Expr) bool {
 	case *ast.BinaryExpr:
 		return combinesWithName(x.X) && !isTypeElem(x.Y)
 	case *ast.ParenExpr:
-		return combinesWithName(x.X)
+		return !isTypeElem(x.X)
 	}
 	return false
 }
@@ -1737,6 +1737,9 @@ func (p *printer) genDecl(d *ast.GenDecl) {
 	p.setPos(d.Pos())
 	p.print(d.Tok, blank)
 
+	defer func(d bool) { p.inDecl = d }(p.inDecl)
+	p.inDecl = true
+
 	if d.Lparen.IsValid() || len(d.Specs) != 1 {
 		// group of parenthesized declarations
 		p.setPos(d.Lparen)
@@ -1921,6 +1924,10 @@ func (p *printer) funcDecl(d *ast.FuncDecl) {
 	p.setComment(d.Doc)
 	p.setPos(d.Pos())
 	p.print(token.FUNC, blank)
+
+	defer func(d bool) { p.inDecl = d }(p.inDecl)
+	p.inDecl = true
+
 	// We have to save startCol only after emitting FUNC; otherwise it can be on a
 	// different line (all whitespace preceding the FUNC is emitted only when the
 	// FUNC is emitted).
