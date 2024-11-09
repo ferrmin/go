@@ -21,8 +21,11 @@ lable2:
 	MOVW	$65536, R4		// 04020014
 	MOVW	$4096, R4		// 24000014
 	MOVV	$65536, R4		// 04020014
+	MOVB	R4, R5			// 855c0000
+	MOVH	R4, R5			// 85580000
 	MOVV	$4096, R4		// 24000014
 	MOVW	R4, R5			// 85001700
+	MOVWU	R4, R5			// 8500df00
 	MOVV	R4, R5			// 85001500
 	MOVBU	R4, R5			// 85fc4303
 	SUB	R4, R5, R6		// a6101100
@@ -401,3 +404,55 @@ lable2:
 	FSCALEBD	F4, F5, F6	// a6101101
 	FLOGBF		F4, F5		// 85241401
 	FLOGBD		F4, F5		// 85281401
+
+	// VSTX/VLDX/XVSTX/XVLDX instructions
+	VMOVQ		V2, (R5)(R5)    // a2144438
+	VMOVQ		(R4)(R5), V2    // 82144038
+	XVMOVQ		X2, (R4)(R5)    // 82144c38
+	XVMOVQ		(R4)(R5), X2    // 82144838
+
+	// VST/VLD/XVST/XVLD instructions
+	VMOVQ		V2, (R4)        // 8200402c
+	VMOVQ		V2, 3(R4)       // 820c402c
+	VMOVQ		V2, 2040(R4)    // 82e05f2c
+	VMOVQ		V2, -2040(R4)   // 8220602c
+	VMOVQ		V2, y+16(FP)    // 0260402c
+	VMOVQ		V2, x+2030(FP)  // 02d85f2c
+	VMOVQ		(R4), V2        // 8200002c
+	VMOVQ		3(R4), V2       // 820c002c
+	VMOVQ		2044(R4), V2    // 82f01f2c
+	VMOVQ		-2044(R4), V2   // 8210202c
+	VMOVQ		y+16(FP), V2    // 0260002c
+	VMOVQ		x+2030(FP), V2  // 02d81f2c
+	XVMOVQ		X2, (R4)        // 8200c02c
+	XVMOVQ		X3, 3(R4)       // 830cc02c
+	XVMOVQ		X4, 2040(R4)    // 84e0df2c
+	XVMOVQ		X5, -2040(R4)   // 8520e02c
+	XVMOVQ		X6, y+16(FP)    // 0660c02c
+	XVMOVQ		X7, x+2030(FP)  // 07d8df2c
+	XVMOVQ		(R4), X2        // 8200802c
+	XVMOVQ		3(R4), X3       // 830c802c
+	XVMOVQ		2044(R4), X4    // 84f09f2c
+	XVMOVQ		-2044(R4), X5   // 8510a02c
+	XVMOVQ		y+16(FP), X6    // 0660802c
+	XVMOVQ		x+2030(FP), X7  // 07d89f2c
+
+	// VSEQ{B,H,W,V}, XVSEQ{B,H,W,V} instruction
+	VSEQB		V1, V2, V3      // 43040070
+	VSEQH		V1, V2, V3      // 43840070
+	VSEQW		V1, V2, V3      // 43040170
+	VSEQV		V1, V2, V3      // 43840170
+	XVSEQB		X3, X2, X4      // 440c0074
+	XVSEQH		X3, X2, X4      // 448c0074
+	XVSEQW		X3, X2, X4      // 440c0174
+	XVSEQV		X3, X2, X4      // 448c0174
+
+	// VPCNT{B,H,W,V}, XVPCNT{B,H,W,V} instruction
+	VPCNTB		V1, V2          // 22209c72
+	VPCNTH		V1, V2          // 22249c72
+	VPCNTW		V1, V2          // 22289c72
+	VPCNTV		V1, V2          // 222c9c72
+	XVPCNTB		X3, X2          // 62209c76
+	XVPCNTH		X3, X2          // 62249c76
+	XVPCNTW		X3, X2          // 62289c76
+	XVPCNTV		X3, X2          // 622c9c76
