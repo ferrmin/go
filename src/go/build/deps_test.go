@@ -96,7 +96,8 @@ var depsRules = `
 	< internal/runtime/maps
 	< runtime
 	< sync/atomic
-	< internal/weak
+	< internal/sync
+	< weak
 	< sync
 	< internal/bisect
 	< internal/godebug
@@ -113,7 +114,8 @@ var depsRules = `
 
 	RUNTIME
 	< sort
-	< container/heap;
+	< container/heap
+	< unique;
 
 	RUNTIME
 	< io;
@@ -163,9 +165,6 @@ var depsRules = `
 	MATH
 	< runtime/metrics;
 
-	RUNTIME, math/rand/v2
-	< internal/concurrent;
-
 	MATH, unicode/utf8
 	< strconv;
 
@@ -178,9 +177,6 @@ var depsRules = `
 
 	bufio, path, strconv
 	< STR;
-
-	RUNTIME, internal/concurrent
-	< unique;
 
 	# OS is basic OS access, including helpers (path/filepath, os/exec, etc).
 	# OS includes string routines, but those must be layered above package os.
@@ -444,72 +440,101 @@ var depsRules = `
 	NET, log
 	< net/mail;
 
-	NONE < crypto/internal/impl;
+	io, math/rand/v2 < crypto/internal/randutil;
+
+	STR < crypto/internal/impl;
+
+	OS < crypto/internal/sysrand
+	< crypto/internal/entropy;
+
+	internal/byteorder < crypto/internal/fips140deps/byteorder;
+	internal/cpu, internal/goarch < crypto/internal/fips140deps/cpu;
+	internal/godebug < crypto/internal/fips140deps/godebug;
 
 	# FIPS is the FIPS 140 module.
 	# It must not depend on external crypto packages.
-	# Internal packages imported by FIPS might need to retain
-	# backwards compatibility with older versions of the module.
-	STR, crypto/internal/impl
-	< crypto/internal/fips
-	< crypto/internal/fips/subtle
-	< crypto/internal/fips/sha256
-	< crypto/internal/fips/sha512
-	< crypto/internal/fips/sha3
-	< crypto/internal/fips/hmac
-	< crypto/internal/fips/check
+	STR, crypto/internal/impl,
+	crypto/internal/entropy,
+	crypto/internal/randutil,
+	crypto/internal/fips140deps/byteorder,
+	crypto/internal/fips140deps/cpu,
+	crypto/internal/fips140deps/godebug
+	< crypto/internal/fips140
+	< crypto/internal/fips140/alias
+	< crypto/internal/fips140/subtle
+	< crypto/internal/fips140/sha256
+	< crypto/internal/fips140/sha512
+	< crypto/internal/fips140/sha3
+	< crypto/internal/fips140/hmac
+	< crypto/internal/fips140/check
+	< crypto/internal/fips140/pbkdf2
+	< crypto/internal/fips140/aes
+	< crypto/internal/fips140/drbg
+	< crypto/internal/fips140/aes/gcm
+	< crypto/internal/fips140/hkdf
+	< crypto/internal/fips140/mlkem
+	< crypto/internal/fips140/ssh
+	< crypto/internal/fips140/tls12
+	< crypto/internal/fips140/tls13
+	< crypto/internal/fips140/bigmod
+	< crypto/internal/fips140/nistec/fiat
+	< crypto/internal/fips140/nistec
+	< crypto/internal/fips140/ecdh
+	< crypto/internal/fips140/ecdsa
+	< crypto/internal/fips140/edwards25519/field
+	< crypto/internal/fips140/edwards25519
+	< crypto/internal/fips140/ed25519
+	< crypto/internal/fips140/rsa
 	< FIPS;
 
-	FIPS < crypto/internal/fips/check/checktest;
+	FIPS < crypto/internal/fips140/check/checktest;
+
+	FIPS, sync/atomic < crypto/tls/internal/fips140tls;
+
+	FIPS, internal/godebug, hash < crypto/fips140, crypto/internal/fips140only;
 
 	NONE < crypto/internal/boring/sig, crypto/internal/boring/syso;
-	sync/atomic < crypto/internal/boring/bcache, crypto/internal/boring/fipstls;
-	crypto/internal/boring/sig, crypto/internal/boring/fipstls < crypto/tls/fipsonly;
+	sync/atomic < crypto/internal/boring/bcache, crypto/internal/boring/fips140tls;
+	crypto/internal/boring/sig, crypto/tls/internal/fips140tls < crypto/tls/fipsonly;
 
 	# CRYPTO is core crypto algorithms - no cgo, fmt, net.
-	FIPS,
+	FIPS, crypto/internal/fips140only,
 	crypto/internal/boring/sig,
 	crypto/internal/boring/syso,
 	golang.org/x/sys/cpu,
 	hash, embed
 	< crypto
 	< crypto/subtle
-	< crypto/internal/alias
-	< crypto/cipher;
+	< crypto/cipher
+	< crypto/sha3;
 
 	crypto/cipher,
 	crypto/internal/boring/bcache
 	< crypto/internal/boring
 	< crypto/boring;
 
-	crypto/internal/alias, math/rand/v2
-	< crypto/internal/randutil
-	< crypto/internal/nistec/fiat
-	< crypto/internal/nistec
-	< crypto/internal/edwards25519/field
-	< crypto/internal/edwards25519;
-
 	crypto/boring
 	< crypto/aes, crypto/des, crypto/hmac, crypto/md5, crypto/rc4,
-	  crypto/sha1, crypto/sha256, crypto/sha512;
+	  crypto/sha1, crypto/sha256, crypto/sha512, crypto/hkdf;
 
-	crypto/boring, crypto/internal/edwards25519/field
+	crypto/boring, crypto/internal/fips140/edwards25519/field
 	< crypto/ecdh;
 
-	# Unfortunately, stuck with reflect via encoding/binary.
-	encoding/binary, crypto/boring < golang.org/x/crypto/sha3;
+	crypto/hmac < crypto/pbkdf2;
+
+	crypto/internal/fips140/mlkem < crypto/mlkem;
 
 	crypto/aes,
 	crypto/des,
 	crypto/ecdh,
 	crypto/hmac,
-	crypto/internal/edwards25519,
 	crypto/md5,
 	crypto/rc4,
 	crypto/sha1,
 	crypto/sha256,
 	crypto/sha512,
-	golang.org/x/crypto/sha3
+	crypto/sha3,
+	crypto/hkdf
 	< CRYPTO;
 
 	CGO, fmt, net !< CRYPTO;
@@ -518,12 +543,10 @@ var depsRules = `
 	CRYPTO, FMT, math/big
 	< crypto/internal/boring/bbig
 	< crypto/rand
-	< crypto/internal/mlkem768
 	< crypto/ed25519
 	< encoding/asn1
 	< golang.org/x/crypto/cryptobyte/asn1
 	< golang.org/x/crypto/cryptobyte
-	< crypto/internal/bigmod
 	< crypto/dsa, crypto/elliptic, crypto/rsa
 	< crypto/ecdsa
 	< CRYPTO-MATH;
@@ -537,12 +560,11 @@ var depsRules = `
 	< golang.org/x/crypto/chacha20
 	< golang.org/x/crypto/internal/poly1305
 	< golang.org/x/crypto/chacha20poly1305
-	< golang.org/x/crypto/hkdf
 	< crypto/internal/hpke
 	< crypto/x509/internal/macos
 	< crypto/x509/pkix;
 
-	crypto/internal/boring/fipstls, crypto/x509/pkix
+	crypto/tls/internal/fips140tls, crypto/x509/pkix
 	< crypto/x509
 	< crypto/tls;
 
@@ -636,6 +658,10 @@ var depsRules = `
 	FMT, DEBUG, flag, runtime/trace, internal/sysinfo, math/rand
 	< testing;
 
+	RUNTIME
+	< internal/synctest
+	< testing/synctest;
+
 	log/slog, testing
 	< testing/slogtest;
 
@@ -664,11 +690,11 @@ var depsRules = `
 	FMT
 	< internal/txtar;
 
-	CRYPTO-MATH, testing, internal/testenv
+	CRYPTO-MATH, testing, internal/testenv, encoding/json
 	< crypto/internal/cryptotest;
 
 	CGO, FMT
-	< crypto/rand/internal/seccomp;
+	< crypto/internal/sysrand/internal/seccomp;
 
 	# v2 execution trace parser.
 	FMT

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"internal/godebug"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,8 @@ import (
 // our command line are for us, and some are for the test binary, and
 // some are for both.
 
+var gotestjsonbuildtext = godebug.New("gotestjsonbuildtext")
+
 func init() {
 	work.AddBuildFlags(CmdTest, work.OmitVFlag|work.OmitJSONFlag)
 
@@ -34,7 +37,6 @@ func init() {
 	cf.StringVar(&testO, "o", "", "")
 	work.AddCoverFlags(CmdTest, &testCoverProfile)
 	cf.Var((*base.StringsFlag)(&work.ExecCmd), "exec", "")
-	// TODO(austin): Make test -json imply build -json.
 	cf.BoolVar(&testJSON, "json", false, "")
 	cf.Var(&testVet, "vet", "")
 
@@ -355,7 +357,11 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 		delete(addFromGOFLAGS, "v")
 		delete(addFromGOFLAGS, "test.v")
 
-		cfg.BuildJSON = true
+		if gotestjsonbuildtext.Value() == "1" {
+			gotestjsonbuildtext.IncNonDefault()
+		} else {
+			cfg.BuildJSON = true
+		}
 	}
 
 	// Inject flags from GOFLAGS before the explicit command-line arguments.

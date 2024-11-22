@@ -16,18 +16,32 @@ TEXT ·Cas(SB), NOSPLIT, $0-17
 	MOVV	ptr+0(FP), R4
 	MOVW	old+8(FP), R5
 	MOVW	new+12(FP), R6
-	DBAR
+
+	MOVBU	internal∕cpu·Loong64+const_offsetLOONG64HasLAMCAS(SB), R8
+	BEQ	R8, cas_again
+	MOVV	R5, R7  // backup old value
+	AMCASDBW	R6, (R4), R5
+	BNE	R7, R5, cas_fail0
+	MOVV	$1, R4
+	MOVB	R4, ret+16(FP)
+	RET
+cas_fail0:
+	MOVB	R0, ret+16(FP)
+	RET
+
+	// Implemented using the ll-sc instruction pair
+	DBAR	$0x14	// LoadAcquire barrier
 cas_again:
 	MOVV	R6, R7
 	LL	(R4), R8
-	BNE	R5, R8, cas_fail
+	BNE	R5, R8, cas_fail1
 	SC	R7, (R4)
 	BEQ	R7, cas_again
 	MOVV	$1, R4
 	MOVB	R4, ret+16(FP)
-	DBAR
+	DBAR	$0x12	// StoreRelease barrier
 	RET
-cas_fail:
+cas_fail1:
 	MOVV	$0, R4
 	JMP	-4(PC)
 
@@ -43,20 +57,40 @@ TEXT ·Cas64(SB), NOSPLIT, $0-25
 	MOVV	ptr+0(FP), R4
 	MOVV	old+8(FP), R5
 	MOVV	new+16(FP), R6
-	DBAR
+
+	MOVBU	internal∕cpu·Loong64+const_offsetLOONG64HasLAMCAS(SB), R8
+	BEQ	R8, cas64_again
+	MOVV	R5, R7  // backup old value
+	AMCASDBV	R6, (R4), R5
+	BNE	R7, R5, cas64_fail0
+	MOVV	$1, R4
+	MOVB	R4, ret+24(FP)
+	RET
+cas64_fail0:
+	MOVB	R0, ret+24(FP)
+	RET
+
+	// Implemented using the ll-sc instruction pair
+	DBAR	$0x14
 cas64_again:
 	MOVV	R6, R7
 	LLV	(R4), R8
-	BNE	R5, R8, cas64_fail
+	BNE	R5, R8, cas64_fail1
 	SCV	R7, (R4)
 	BEQ	R7, cas64_again
 	MOVV	$1, R4
 	MOVB	R4, ret+24(FP)
-	DBAR
+	DBAR	$0x12
 	RET
-cas64_fail:
+cas64_fail1:
 	MOVV	$0, R4
 	JMP	-4(PC)
+
+TEXT ·Casint32(SB),NOSPLIT,$0-17
+	JMP	·Cas(SB)
+
+TEXT ·Casint64(SB),NOSPLIT,$0-25
+	JMP	·Cas64(SB)
 
 TEXT ·Casuintptr(SB), NOSPLIT, $0-25
 	JMP	·Cas64(SB)
@@ -114,6 +148,44 @@ TEXT ·Xadd64(SB), NOSPLIT, $0-24
 	AMADDDBV	R5, (R4), R6
 	ADDV	R6, R5, R4
 	MOVV	R4, ret+16(FP)
+	RET
+
+// uint8 Xchg8(ptr *uint8, new uint8)
+// Atomically:
+//     old := *ptr;
+//     *ptr = new;
+//     return old;
+TEXT ·Xchg8(SB), NOSPLIT, $0-17
+	MOVV	ptr+0(FP), R4
+	MOVBU	new+8(FP), R5
+
+	// R6 = ((ptr & 3) * 8)
+	AND	$3, R4, R6
+	SLLV	$3, R6
+
+	// R7 = ((0xFF) << R6) ^ (-1)
+	MOVV	$0xFF, R8
+	SLLV	R6, R8, R7
+	XOR	$-1, R7
+
+	// R4 = ptr & (~3)
+	MOVV	$~3, R8
+	AND	R8, R4
+
+	// R5 = ((val) << R6)
+	SLLV	R6, R5
+
+	DBAR	$0x14	// LoadAcquire barrier
+_xchg8_again:
+	LL	(R4), R8
+	MOVV	R8, R9	// backup old val
+	AND	R7, R8
+	OR	R5, R8
+	SC	R8, (R4)
+	BEQ	R8, _xchg8_again
+	DBAR	$0x12	// StoreRelease barrier
+	SRLV	R6, R9, R9
+	MOVBU	R9, ret+16(FP)
 	RET
 
 // func Xchg(ptr *uint32, new uint32) uint32
