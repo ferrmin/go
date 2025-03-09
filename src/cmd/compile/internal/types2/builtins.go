@@ -377,7 +377,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 
 	case _Copy:
 		// copy(x, y []T) int
-		dst, _ := commonUnder(check, x.typ, nil).(*Slice)
+		u, _ := commonUnder(x.typ, nil)
+		dst, _ := u.(*Slice)
 
 		y := args[1]
 		src0 := coreString(y.typ)
@@ -514,7 +515,7 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		}
 
 		var min int // minimum number of arguments
-		switch coreType(T).(type) {
+		switch u, _ := commonUnder(T, nil); u.(type) {
 		case *Slice:
 			min = 2
 		case *Map, *Chan:
@@ -818,7 +819,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		// unsafe.Slice(ptr *T, len IntegerType) []T
 		check.verifyVersionf(call.Fun, go1_17, "unsafe.Slice")
 
-		ptr, _ := commonUnder(check, x.typ, nil).(*Pointer)
+		u, _ := commonUnder(x.typ, nil)
+		ptr, _ := u.(*Pointer)
 		if ptr == nil {
 			check.errorf(x, InvalidUnsafeSlice, invalidArg+"%s is not a pointer", x)
 			return
@@ -839,7 +841,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		// unsafe.SliceData(slice []T) *T
 		check.verifyVersionf(call.Fun, go1_20, "unsafe.SliceData")
 
-		slice, _ := commonUnder(check, x.typ, nil).(*Slice)
+		u, _ := commonUnder(x.typ, nil)
+		slice, _ := u.(*Slice)
 		if slice == nil {
 			check.errorf(x, InvalidUnsafeSliceData, invalidArg+"%s is not a slice", x)
 			return
@@ -1032,13 +1035,13 @@ func (check *Checker) applyTypeFunc(f func(Type) Type, x *operand, id builtinId)
 func makeSig(res Type, args ...Type) *Signature {
 	list := make([]*Var, len(args))
 	for i, param := range args {
-		list[i] = NewVar(nopos, nil, "", Default(param))
+		list[i] = NewParam(nopos, nil, "", Default(param))
 	}
 	params := NewTuple(list...)
 	var result *Tuple
 	if res != nil {
 		assert(!isUntyped(res))
-		result = NewTuple(NewVar(nopos, nil, "", res))
+		result = NewTuple(newVar(ResultVar, nopos, nil, "", res))
 	}
 	return &Signature{params: params, results: result}
 }

@@ -328,6 +328,12 @@ func compilerRequiredAsanVersion(goos, goarch string) bool {
 	}
 }
 
+// compilerRequiredLsanVersion reports whether the compiler is the
+// version required by Lsan.
+func compilerRequiredLsanVersion(goos, goarch string) bool {
+	return compilerRequiredAsanVersion(goos, goarch)
+}
+
 type compilerCheck struct {
 	once sync.Once
 	err  error
@@ -355,10 +361,18 @@ func configure(sanitizer string) *config {
 		return c
 	}
 
+	sanitizerOpt := sanitizer
+	// For the leak detector, we use "go build -asan",
+	// which implies the address sanitizer.
+	// We may want to adjust this someday.
+	if sanitizer == "leak" {
+		sanitizerOpt = "address"
+	}
+
 	c := &config{
 		sanitizer: sanitizer,
-		cFlags:    []string{"-fsanitize=" + sanitizer},
-		ldFlags:   []string{"-fsanitize=" + sanitizer},
+		cFlags:    []string{"-fsanitize=" + sanitizerOpt},
+		ldFlags:   []string{"-fsanitize=" + sanitizerOpt},
 	}
 
 	if testing.Verbose() {
@@ -377,7 +391,7 @@ func configure(sanitizer string) *config {
 			c.ldFlags = append(c.ldFlags, "-fPIC", "-static-libtsan")
 		}
 
-	case "address":
+	case "address", "leak":
 		c.goFlags = append(c.goFlags, "-asan")
 		// Set the debug mode to print the C stack trace.
 		c.cFlags = append(c.cFlags, "-g")
