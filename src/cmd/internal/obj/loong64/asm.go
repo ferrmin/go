@@ -1555,6 +1555,34 @@ func buildop(ctxt *obj.Link) {
 			opset(AVILVHH, r0)
 			opset(AVILVHW, r0)
 			opset(AVILVHV, r0)
+			opset(AVMULB, r0)
+			opset(AVMULH, r0)
+			opset(AVMULW, r0)
+			opset(AVMULV, r0)
+			opset(AVMUHB, r0)
+			opset(AVMUHH, r0)
+			opset(AVMUHW, r0)
+			opset(AVMUHV, r0)
+			opset(AVMUHBU, r0)
+			opset(AVMUHHU, r0)
+			opset(AVMUHWU, r0)
+			opset(AVMUHVU, r0)
+			opset(AVDIVB, r0)
+			opset(AVDIVH, r0)
+			opset(AVDIVW, r0)
+			opset(AVDIVV, r0)
+			opset(AVMODB, r0)
+			opset(AVMODH, r0)
+			opset(AVMODW, r0)
+			opset(AVMODV, r0)
+			opset(AVDIVBU, r0)
+			opset(AVDIVHU, r0)
+			opset(AVDIVWU, r0)
+			opset(AVDIVVU, r0)
+			opset(AVMODBU, r0)
+			opset(AVMODHU, r0)
+			opset(AVMODWU, r0)
+			opset(AVMODVU, r0)
 
 		case AXVSEQB:
 			opset(AXVSEQH, r0)
@@ -1568,6 +1596,34 @@ func buildop(ctxt *obj.Link) {
 			opset(AXVILVHH, r0)
 			opset(AXVILVHW, r0)
 			opset(AXVILVHV, r0)
+			opset(AXVMULB, r0)
+			opset(AXVMULH, r0)
+			opset(AXVMULW, r0)
+			opset(AXVMULV, r0)
+			opset(AXVMUHB, r0)
+			opset(AXVMUHH, r0)
+			opset(AXVMUHW, r0)
+			opset(AXVMUHV, r0)
+			opset(AXVMUHBU, r0)
+			opset(AXVMUHHU, r0)
+			opset(AXVMUHWU, r0)
+			opset(AXVMUHVU, r0)
+			opset(AXVDIVB, r0)
+			opset(AXVDIVH, r0)
+			opset(AXVDIVW, r0)
+			opset(AXVDIVV, r0)
+			opset(AXVMODB, r0)
+			opset(AXVMODH, r0)
+			opset(AXVMODW, r0)
+			opset(AXVMODV, r0)
+			opset(AXVDIVBU, r0)
+			opset(AXVDIVHU, r0)
+			opset(AXVDIVWU, r0)
+			opset(AXVDIVVU, r0)
+			opset(AXVMODBU, r0)
+			opset(AXVMODHU, r0)
+			opset(AXVMODWU, r0)
+			opset(AXVMODVU, r0)
 
 		case AVANDB:
 			opset(AVORB, r0)
@@ -1597,11 +1653,23 @@ func buildop(ctxt *obj.Link) {
 			opset(AVPCNTH, r0)
 			opset(AVPCNTW, r0)
 			opset(AVPCNTV, r0)
+			opset(AVFSQRTF, r0)
+			opset(AVFSQRTD, r0)
+			opset(AVFRECIPF, r0)
+			opset(AVFRECIPD, r0)
+			opset(AVFRSQRTF, r0)
+			opset(AVFRSQRTD, r0)
 
 		case AXVPCNTB:
 			opset(AXVPCNTH, r0)
 			opset(AXVPCNTW, r0)
 			opset(AXVPCNTV, r0)
+			opset(AXVFSQRTF, r0)
+			opset(AXVFSQRTD, r0)
+			opset(AXVFRECIPF, r0)
+			opset(AXVFRECIPD, r0)
+			opset(AXVFRSQRTF, r0)
+			opset(AXVFRSQRTD, r0)
 
 		case AVADDB:
 			opset(AVADDH, r0)
@@ -2850,6 +2918,70 @@ func (c *ctxt0) oprrr(a obj.As) uint32 {
 		return 0x0EA50 << 15 // xvandn.v
 	case AXVORNV:
 		return 0x0EA51 << 15 // xvorn.v
+	case AVDIVB:
+		return 0xe1c0 << 15 // vdiv.b
+	case AVDIVH:
+		return 0xe1c1 << 15 // vdiv.h
+	case AVDIVW:
+		return 0xe1c2 << 15 // vdiv.w
+	case AVDIVV:
+		return 0xe1c3 << 15 // vdiv.d
+	case AVMODB:
+		return 0xe1c4 << 15 // vmod.b
+	case AVMODH:
+		return 0xe1c5 << 15 // vmod.h
+	case AVMODW:
+		return 0xe1c6 << 15 // vmod.w
+	case AVMODV:
+		return 0xe1c7 << 15 // vmod.d
+	case AVDIVBU:
+		return 0xe1c8 << 15 // vdiv.bu
+	case AVDIVHU:
+		return 0xe1c9 << 15 // vdiv.hu
+	case AVDIVWU:
+		return 0xe1ca << 15 // vdiv.wu
+	case AVDIVVU:
+		return 0xe1cb << 15 // vdiv.du
+	case AVMODBU:
+		return 0xe1cc << 15 // vmod.bu
+	case AVMODHU:
+		return 0xe1cd << 15 // vmod.hu
+	case AVMODWU:
+		return 0xe1ce << 15 // vmod.wu
+	case AVMODVU:
+		return 0xe1cf << 15 // vmod.du
+	case AXVDIVB:
+		return 0xe9c0 << 15 // xvdiv.b
+	case AXVDIVH:
+		return 0xe9c1 << 15 // xvdiv.h
+	case AXVDIVW:
+		return 0xe9c2 << 15 // xvdiv.w
+	case AXVDIVV:
+		return 0xe9c3 << 15 // xvdiv.d
+	case AXVMODB:
+		return 0xe9c4 << 15 // xvmod.b
+	case AXVMODH:
+		return 0xe9c5 << 15 // xvmod.h
+	case AXVMODW:
+		return 0xe9c6 << 15 // xvmod.w
+	case AXVMODV:
+		return 0xe9c7 << 15 // xvmod.d
+	case AXVDIVBU:
+		return 0xe9c8 << 15 // xvdiv.bu
+	case AXVDIVHU:
+		return 0xe9c9 << 15 // xvdiv.hu
+	case AXVDIVWU:
+		return 0xe9ca << 15 // xvdiv.wu
+	case AXVDIVVU:
+		return 0xe9cb << 15 // xvdiv.du
+	case AXVMODBU:
+		return 0xe9cc << 15 // xvmod.bu
+	case AXVMODHU:
+		return 0xe9cd << 15 // xvmod.hu
+	case AXVMODWU:
+		return 0xe9ce << 15 // xvmod.wu
+	case AXVMODVU:
+		return 0xe9cf << 15 // xvmod.du
 	case AVSLLB:
 		return 0xe1d0 << 15 // vsll.b
 	case AVSLLH:
@@ -2986,6 +3118,54 @@ func (c *ctxt0) oprrr(a obj.As) uint32 {
 		return 0xea3a << 15 // xvilvh.w
 	case AXVILVHV:
 		return 0xea3b << 15 // xvilvh.d
+	case AVMULB:
+		return 0xe108 << 15 // vmul.b
+	case AVMULH:
+		return 0xe109 << 15 // vmul.h
+	case AVMULW:
+		return 0xe10a << 15 // vmul.w
+	case AVMULV:
+		return 0xe10b << 15 // vmul.d
+	case AVMUHB:
+		return 0xe10c << 15 // vmuh.b
+	case AVMUHH:
+		return 0xe10d << 15 // vmuh.h
+	case AVMUHW:
+		return 0xe10e << 15 // vmuh.w
+	case AVMUHV:
+		return 0xe10f << 15 // vmuh.d
+	case AVMUHBU:
+		return 0xe110 << 15 // vmuh.bu
+	case AVMUHHU:
+		return 0xe111 << 15 // vmuh.hu
+	case AVMUHWU:
+		return 0xe112 << 15 // vmuh.wu
+	case AVMUHVU:
+		return 0xe113 << 15 // vmuh.du
+	case AXVMULB:
+		return 0xe908 << 15 // xvmul.b
+	case AXVMULH:
+		return 0xe909 << 15 // xvmul.h
+	case AXVMULW:
+		return 0xe90a << 15 // xvmul.w
+	case AXVMULV:
+		return 0xe90b << 15 // xvmul.d
+	case AXVMUHB:
+		return 0xe90c << 15 // xvmuh.b
+	case AXVMUHH:
+		return 0xe90d << 15 // xvmuh.h
+	case AXVMUHW:
+		return 0xe90e << 15 // xvmuh.w
+	case AXVMUHV:
+		return 0xe90f << 15 // xvmuh.d
+	case AXVMUHBU:
+		return 0xe910 << 15 // xvmuh.bu
+	case AXVMUHHU:
+		return 0xe911 << 15 // xvmuh.hu
+	case AXVMUHWU:
+		return 0xe912 << 15 // xvmuh.wu
+	case AXVMUHVU:
+		return 0xe913 << 15 // xvmuh.du
 	}
 
 	if a < 0 {
@@ -3162,6 +3342,30 @@ func (c *ctxt0) oprr(a obj.As) uint32 {
 		return 0x1da70a << 10 // xvpcnt.w
 	case AXVPCNTV:
 		return 0x1da70b << 10 // xvpcnt.v
+	case AVFSQRTF:
+		return 0x1ca739 << 10 // vfsqrt.s
+	case AVFSQRTD:
+		return 0x1ca73a << 10 // vfsqrt.d
+	case AVFRECIPF:
+		return 0x1ca73d << 10 // vfrecip.s
+	case AVFRECIPD:
+		return 0x1ca73e << 10 // vfrecip.d
+	case AVFRSQRTF:
+		return 0x1ca741 << 10 // vfrsqrt.s
+	case AVFRSQRTD:
+		return 0x1ca742 << 10 // vfrsqrt.d
+	case AXVFSQRTF:
+		return 0x1da739 << 10 // xvfsqrt.s
+	case AXVFSQRTD:
+		return 0x1da73a << 10 // xvfsqrt.d
+	case AXVFRECIPF:
+		return 0x1da73d << 10 // xvfrecip.s
+	case AXVFRECIPD:
+		return 0x1da73e << 10 // xvfrecip.d
+	case AXVFRSQRTF:
+		return 0x1da741 << 10 // xvfrsqrt.s
+	case AXVFRSQRTD:
+		return 0x1da742 << 10 // xvfrsqrt.d
 	}
 
 	c.ctxt.Diag("bad rr opcode %v", a)
