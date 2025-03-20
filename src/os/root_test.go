@@ -426,6 +426,53 @@ func TestRootChmod(t *testing.T) {
 	}
 }
 
+func TestRootChtimes(t *testing.T) {
+	for _, test := range rootTestCases {
+		test.run(t, func(t *testing.T, target string, root *os.Root) {
+			if target != "" {
+				if err := os.WriteFile(target, nil, 0o666); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, times := range []struct {
+				atime, mtime time.Time
+			}{{
+				atime: time.Now().Add(-1 * time.Minute),
+				mtime: time.Now().Add(-1 * time.Minute),
+			}, {
+				atime: time.Now().Add(1 * time.Minute),
+				mtime: time.Now().Add(1 * time.Minute),
+			}, {
+				atime: time.Time{},
+				mtime: time.Now(),
+			}, {
+				atime: time.Now(),
+				mtime: time.Time{},
+			}} {
+				if runtime.GOOS == "js" {
+					times.atime = times.atime.Truncate(1 * time.Second)
+					times.mtime = times.mtime.Truncate(1 * time.Second)
+				}
+
+				err := root.Chtimes(test.open, times.atime, times.mtime)
+				if errEndsTest(t, err, test.wantError, "root.Chtimes(%q)", test.open) {
+					return
+				}
+				st, err := os.Stat(target)
+				if err != nil {
+					t.Fatalf("os.Stat(%q) = %v", target, err)
+				}
+				if got := st.ModTime(); !times.mtime.IsZero() && !got.Equal(times.mtime) {
+					t.Errorf("after root.Chtimes(%q, %v, %v): got mtime=%v, want %v", test.open, times.atime, times.mtime, got, times.mtime)
+				}
+				if got := os.Atime(st); !times.atime.IsZero() && !got.Equal(times.atime) {
+					t.Errorf("after root.Chtimes(%q, %v, %v): got atime=%v, want %v", test.open, times.atime, times.mtime, got, times.atime)
+				}
+			}
+		})
+	}
+}
+
 func TestRootMkdir(t *testing.T) {
 	for _, test := range rootTestCases {
 		test.run(t, func(t *testing.T, target string, root *os.Root) {
@@ -612,6 +659,35 @@ func TestRootLstat(t *testing.T) {
 				if got := fi.Mode(); got&os.ModeSymlink == 0 {
 					t.Errorf("root.Stat(%q).Mode() = %v, want symlink", test.open, got)
 				}
+			}
+		})
+	}
+}
+
+func TestRootReadlink(t *testing.T) {
+	for _, test := range rootTestCases {
+		test.run(t, func(t *testing.T, target string, root *os.Root) {
+			const content = "content"
+			wantError := test.wantError
+			if test.ltarget != "" {
+				// Readlink will read the final link, rather than following it.
+				wantError = false
+			} else {
+				// Readlink fails on non-link targets.
+				wantError = true
+			}
+
+			got, err := root.Readlink(test.open)
+			if errEndsTest(t, err, wantError, "root.Readlink(%q)", test.open) {
+				return
+			}
+
+			want, err := os.Readlink(filepath.Join(root.Name(), test.ltarget))
+			if err != nil {
+				t.Fatalf("os.Readlink(%q) = %v, want success", test.ltarget, err)
+			}
+			if got != want {
+				t.Errorf("root.Readlink(%q) = %q, want %q", test.open, got, want)
 			}
 		})
 	}
@@ -1012,6 +1088,18 @@ func TestRootConsistencyLstat(t *testing.T) {
 				return "", err
 			}
 			return fmt.Sprintf("name:%q size:%v mode:%v isdir:%v", fi.Name(), fi.Size(), fi.Mode(), fi.IsDir()), nil
+		})
+	}
+}
+
+func TestRootConsistencyReadlink(t *testing.T) {
+	for _, test := range rootConsistencyTestCases {
+		test.run(t, func(t *testing.T, path string, r *os.Root) (string, error) {
+			if r == nil {
+				return os.Readlink(path)
+			} else {
+				return r.Readlink(path)
+			}
 		})
 	}
 }
