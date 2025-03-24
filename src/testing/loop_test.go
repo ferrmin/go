@@ -7,10 +7,12 @@ package testing
 func TestBenchmarkBLoop(t *T) {
 	var initialStart highPrecisionTime
 	var firstStart highPrecisionTime
-	var lastStart highPrecisionTime
+	var scaledStart highPrecisionTime
 	var runningEnd bool
 	runs := 0
 	iters := 0
+	firstBN := 0
+	restBN := 0
 	finalBN := 0
 	bRet := Benchmark(func(b *B) {
 		initialStart = b.start
@@ -18,8 +20,13 @@ func TestBenchmarkBLoop(t *T) {
 		for b.Loop() {
 			if iters == 0 {
 				firstStart = b.start
+				firstBN = b.N
+			} else {
+				restBN = max(restBN, b.N)
 			}
-			lastStart = b.start
+			if iters == 1 {
+				scaledStart = b.start
+			}
 			iters++
 		}
 		finalBN = b.N
@@ -37,6 +44,13 @@ func TestBenchmarkBLoop(t *T) {
 	if finalBN != iters || bRet.N != iters {
 		t.Errorf("benchmark iterations mismatch: %d loop iterations, final b.N=%d, bRet.N=%d", iters, finalBN, bRet.N)
 	}
+	// Verify that b.N was 0 inside the loop
+	if firstBN != 0 {
+		t.Errorf("want b.N == 0 on first iteration, got %d", firstBN)
+	}
+	if restBN != 0 {
+		t.Errorf("want b.N == 0 on subsequent iterations, got %d", restBN)
+	}
 	// Make sure the benchmark ran for an appropriate amount of time.
 	if bRet.T < benchTime.d {
 		t.Fatalf("benchmark ran for %s, want >= %s", bRet.T, benchTime.d)
@@ -45,8 +59,8 @@ func TestBenchmarkBLoop(t *T) {
 	if firstStart == initialStart {
 		t.Errorf("b.Loop did not reset the timer")
 	}
-	if lastStart != firstStart {
-		t.Errorf("timer was reset during iteration")
+	if scaledStart != firstStart {
+		t.Errorf("b.Loop stops and restarts the timer during iteration")
 	}
 	// Verify that it stopped the timer after the last loop.
 	if runningEnd {
