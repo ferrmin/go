@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -190,17 +191,17 @@ type _TCP_INFO_v0 struct {
 	SynRetrans        uint8
 }
 
-func newFD(t testing.TB, h syscall.Handle, kind string, overlapped bool) *poll.FD {
+func newFD(t testing.TB, h syscall.Handle, kind string, overlapped, pollable bool) *poll.FD {
 	fd := poll.FD{
 		Sysfd:         h,
 		IsStream:      true,
 		ZeroReadIsEOF: true,
 	}
-	err := fd.Init(kind, true)
+	err := fd.Init(kind, pollable)
 	if overlapped && err != nil {
 		// Overlapped file handles should not error.
 		t.Fatal(err)
-	} else if !overlapped && err == nil {
+	} else if !overlapped && pollable && err == nil {
 		// Non-overlapped file handles should return an error but still
 		// be usable as sync handles.
 		t.Fatal("expected error for non-overlapped file handle")
@@ -208,7 +209,7 @@ func newFD(t testing.TB, h syscall.Handle, kind string, overlapped bool) *poll.F
 	return &fd
 }
 
-func newFile(t testing.TB, name string, overlapped bool) *poll.FD {
+func newFile(t testing.TB, name string, overlapped, pollable bool) *poll.FD {
 	namep, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +230,15 @@ func newFile(t testing.TB, name string, overlapped bool) *poll.FD {
 			t.Fatal(err)
 		}
 	})
-	return newFD(t, h, "file", overlapped)
+	typ, err := syscall.GetFileType(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind := "file"
+	if typ == syscall.FILE_TYPE_PIPE {
+		kind = "pipe"
+	}
+	return newFD(t, h, kind, overlapped, pollable)
 }
 
 var currentProces = sync.OnceValue(func() string {
@@ -239,8 +248,19 @@ var currentProces = sync.OnceValue(func() string {
 
 var pipeCounter atomic.Uint64
 
-func newPipe(t testing.TB, overlapped bool) (string, *poll.FD) {
-	name := `\\.\pipe\go-internal-poll-test-` + currentProces() + `-` + strconv.FormatUint(pipeCounter.Add(1), 10)
+func newBytePipe(t testing.TB, name string, overlapped, pollable bool) *poll.FD {
+	return newPipe(t, name, false, overlapped, pollable)
+}
+
+func newMessagePipe(t testing.TB, name string, overlapped, pollable bool) *poll.FD {
+	return newPipe(t, name, true, overlapped, pollable)
+}
+
+func pipeName() string {
+	return `\\.\pipe\go-internal-poll-test-` + currentProces() + `-` + strconv.FormatUint(pipeCounter.Add(1), 10)
+}
+
+func newPipe(t testing.TB, name string, message, overlapped, pollable bool) *poll.FD {
 	wname, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +270,11 @@ func newPipe(t testing.TB, overlapped bool) (string, *poll.FD) {
 	if overlapped {
 		flags |= syscall.FILE_FLAG_OVERLAPPED
 	}
-	h, err := windows.CreateNamedPipe(wname, uint32(flags), windows.PIPE_TYPE_BYTE, 1, 4096, 4096, 0, nil)
+	typ := windows.PIPE_TYPE_BYTE
+	if message {
+		typ = windows.PIPE_TYPE_MESSAGE
+	}
+	h, err := windows.CreateNamedPipe(wname, uint32(flags), uint32(typ), 1, 4096, 4096, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +283,7 @@ func newPipe(t testing.TB, overlapped bool) (string, *poll.FD) {
 			t.Fatal(err)
 		}
 	})
-	return name, newFD(t, h, "pipe", overlapped)
+	return newFD(t, h, "pipe", overlapped, pollable)
 }
 
 func testReadWrite(t *testing.T, fdr, fdw *poll.FD) {
@@ -335,49 +359,58 @@ func testPreadPwrite(t *testing.T, fdr, fdw *poll.FD) {
 }
 
 func TestFile(t *testing.T) {
-	test := func(t *testing.T, r, w bool) {
-		name := filepath.Join(t.TempDir(), "foo")
-		rh := newFile(t, name, r)
-		wh := newFile(t, name, w)
-		testReadWrite(t, rh, wh)
-		testPreadPwrite(t, rh, wh)
+	t.Parallel()
+	tests := []struct {
+		name            string
+		overlappedRead  bool
+		overlappedWrite bool
+		pollable        bool
+	}{
+		{"overlapped", true, true, true},
+		{"overlapped-nonpollable", true, true, false},
+		{"overlapped-read", true, false, true},
+		{"overlapped-write", false, true, true},
+		{"sync", false, false, false},
+		{"sync-pollable", false, false, true},
 	}
-	t.Run("overlapped", func(t *testing.T) {
-		test(t, true, true)
-	})
-	t.Run("overlapped-read", func(t *testing.T) {
-		test(t, true, false)
-	})
-	t.Run("overlapped-write", func(t *testing.T) {
-		test(t, false, true)
-	})
-	t.Run("sync", func(t *testing.T) {
-		test(t, false, false)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			name := filepath.Join(t.TempDir(), "foo")
+			rh := newFile(t, name, tt.overlappedRead, tt.pollable)
+			wh := newFile(t, name, tt.overlappedWrite, tt.pollable)
+			testReadWrite(t, rh, wh)
+			testPreadPwrite(t, rh, wh)
+		})
+	}
 }
 
 func TestPipe(t *testing.T) {
-	t.Run("overlapped", func(t *testing.T) {
-		name, pipe := newPipe(t, true)
-		file := newFile(t, name, true)
-		testReadWrite(t, pipe, file)
-	})
-	t.Run("overlapped-write", func(t *testing.T) {
-		name, pipe := newPipe(t, true)
-		file := newFile(t, name, false)
-		testReadWrite(t, file, pipe)
-	})
-	t.Run("overlapped-read", func(t *testing.T) {
-		name, pipe := newPipe(t, false)
-		file := newFile(t, name, true)
-		testReadWrite(t, file, pipe)
-	})
-	t.Run("sync", func(t *testing.T) {
-		name, pipe := newPipe(t, false)
-		file := newFile(t, name, false)
-		testReadWrite(t, file, pipe)
-	})
+	t.Parallel()
+	tests := []struct {
+		name            string
+		overlappedRead  bool
+		overlappedWrite bool
+		pollable        bool
+	}{
+		{"overlapped", true, true, true},
+		{"overlapped-nonpollable", true, true, false},
+		{"overlapped-write", false, true, true},
+		{"overlapped-read", true, false, true},
+		{"sync", false, false, false},
+		{"sync-pollable", false, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			name := pipeName()
+			pipe := newBytePipe(t, name, tt.overlappedWrite, tt.pollable)
+			file := newFile(t, name, tt.overlappedRead, tt.pollable)
+			testReadWrite(t, pipe, file)
+		})
+	}
 	t.Run("anonymous", func(t *testing.T) {
+		t.Parallel()
 		var r, w syscall.Handle
 		if err := syscall.CreatePipe(&r, &w, nil, 0); err != nil {
 			t.Fatal(err)
@@ -391,10 +424,68 @@ func TestPipe(t *testing.T) {
 			}
 		}()
 		// CreatePipe always returns sync handles.
-		fdr := newFD(t, r, "pipe", false)
-		fdw := newFD(t, w, "file", false)
+		fdr := newFD(t, r, "pipe", false, false)
+		fdw := newFD(t, w, "file", false, false)
 		testReadWrite(t, fdr, fdw)
 	})
+}
+
+func TestPipeWriteEOF(t *testing.T) {
+	t.Parallel()
+	name := pipeName()
+	pipe := newMessagePipe(t, name, false, true)
+	file := newFile(t, name, false, true)
+	read := make(chan struct{}, 1)
+	go func() {
+		_, err := pipe.Write(nil)
+		read <- struct{}{}
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+	<-read
+	var buf [10]byte
+	n, err := file.Read(buf[:])
+	if err != io.EOF {
+		t.Errorf("expected EOF, got %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 bytes, got %d", n)
+	}
+}
+
+func TestPipeCanceled(t *testing.T) {
+	t.Parallel()
+	name := pipeName()
+	_ = newBytePipe(t, name, true, true)
+	file := newFile(t, name, true, true)
+	ch := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-ch:
+				return
+			default:
+				syscall.CancelIo(syscall.Handle(file.Sysfd))
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+	// Try to cancel for max 1 second.
+	// Canceling is normally really fast, but it can take an
+	// arbitrary amount of time on busy systems.
+	// If it takes too long, we skip the test.
+	file.SetReadDeadline(time.Now().Add(1 * time.Second))
+	var tmp [1]byte
+	// Read will block until the cancel is complete.
+	_, err := file.Read(tmp[:])
+	ch <- struct{}{}
+	if err == poll.ErrDeadlineExceeded {
+		t.Skip("took too long to cancel")
+	}
+	if err != syscall.ERROR_OPERATION_ABORTED {
+		t.Errorf("expected ERROR_OPERATION_ABORTED, got %v", err)
+	}
 }
 
 func BenchmarkReadOverlapped(b *testing.B) {
@@ -412,7 +503,7 @@ func benchmarkRead(b *testing.B, overlapped bool) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	file := newFile(b, name, overlapped)
+	file := newFile(b, name, overlapped, true)
 	var buf [len(content)]byte
 	for b.Loop() {
 		_, err := io.ReadFull(file, buf[:])
