@@ -115,10 +115,6 @@ type Flags struct {
 	// SwissMap enables the SwissTable-based map implementation.
 	SwissMap bool
 
-	// SpinbitMutex enables the new "spinbit" mutex implementation on supported
-	// platforms. See https://go.dev/issue/68578.
-	SpinbitMutex bool
-
 	// SyncHashTrieMap enables the HashTrieMap sync.Map implementation.
 	SyncHashTrieMap bool
 
@@ -130,4 +126,7 @@ type Flags struct {
 
 	// JSONv2 enables the json/v2 package.
 	JSONv2 bool
+
+	// GreenTeaGC enables the Green Tea GC implementation.
+	GreenTeaGC bool
 }
