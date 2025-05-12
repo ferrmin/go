@@ -17,7 +17,7 @@ import (
 
 const finBlockSize = 4 * 1024
 
-// finBlock is an block of finalizers/cleanups to be executed. finBlocks
+// finBlock is an block of finalizers to be executed. finBlocks
 // are arranged in a linked list for the finalizer queue.
 //
 // finBlock is allocated from non-GC'd memory, so any heap pointers
@@ -165,7 +165,7 @@ func wakefing() *g {
 func createfing() {
 	// start the finalizer goroutine exactly once
 	if fingStatus.Load() == fingUninitialized && fingStatus.CompareAndSwap(fingUninitialized, fingCreated) {
-		go runFinalizersAndCleanups()
+		go runFinalizers()
 	}
 }
 
@@ -177,8 +177,8 @@ func finalizercommit(gp *g, lock unsafe.Pointer) bool {
 	return true
 }
 
-// This is the goroutine that runs all of the finalizers and cleanups.
-func runFinalizersAndCleanups() {
+// This is the goroutine that runs all of the finalizers.
+func runFinalizers() {
 	var (
 		frame    unsafe.Pointer
 		framecap uintptr
@@ -207,22 +207,6 @@ func runFinalizersAndCleanups() {
 			for i := fb.cnt; i > 0; i-- {
 				f := &fb.fin[i-1]
 
-				// arg will only be nil when a cleanup has been queued.
-				if f.arg == nil {
-					var cleanup func()
-					fn := unsafe.Pointer(f.fn)
-					cleanup = *(*func())(unsafe.Pointer(&fn))
-					fingStatus.Or(fingRunningFinalizer)
-					cleanup()
-					fingStatus.And(^fingRunningFinalizer)
-
-					f.fn = nil
-					f.arg = nil
-					f.ot = nil
-					atomic.Store(&fb.cnt, i-1)
-					continue
-				}
-
 				var regs abi.RegArgs
 				// The args may be passed in registers or on stack. Even for
 				// the register case, we still need the spill slots.
@@ -241,8 +225,6 @@ func runFinalizersAndCleanups() {
 					frame = mallocgc(framesz, nil, true)
 					framecap = framesz
 				}
-				// cleanups also have a nil fint. Cleanups should have been processed before
-				// reaching this point.
 				if f.fint == nil {
 					throw("missing type in finalizer")
 				}
@@ -324,7 +306,7 @@ func isGoPointerWithoutSpan(p unsafe.Pointer) bool {
 // blockUntilEmptyFinalizerQueue blocks until either the finalizer
 // queue is emptied (and the finalizers have executed) or the timeout
 // is reached. Returns true if the finalizer queue was emptied.
-// This is used by the runtime and sync tests.
+// This is used by the runtime, sync, and unique tests.
 func blockUntilEmptyFinalizerQueue(timeout int64) bool {
 	start := nanotime()
 	for nanotime()-start < timeout {
@@ -340,6 +322,11 @@ func blockUntilEmptyFinalizerQueue(timeout int64) bool {
 		Gosched()
 	}
 	return false
+}
+
+//go:linkname unique_runtime_blockUntilEmptyFinalizerQueue unique.runtime_blockUntilEmptyFinalizerQueue
+func unique_runtime_blockUntilEmptyFinalizerQueue(timeout int64) bool {
+	return blockUntilEmptyFinalizerQueue(timeout)
 }
 
 // SetFinalizer sets the finalizer associated with obj to the provided
