@@ -229,6 +229,9 @@ func testCrashHandler(t *testing.T, cgo bool) {
 	}
 	var output string
 	if cgo {
+		if runtime.GOOS == "freebsd" && race.Enabled {
+			t.Skipf("race + cgo freebsd not supported. See https://go.dev/issue/73788.")
+		}
 		output = runTestProg(t, "testprogcgo", "Crash")
 	} else {
 		output = runTestProg(t, "testprog", "Crash")
@@ -850,6 +853,9 @@ func TestTimePprof(t *testing.T) {
 	switch runtime.GOOS {
 	case "aix", "darwin", "illumos", "openbsd", "solaris":
 		t.Skipf("skipping on %s because nanotime calls libc", runtime.GOOS)
+	}
+	if race.Enabled || asan.Enabled || msan.Enabled {
+		t.Skip("skipping on sanitizers because the sanitizer runtime is external code")
 	}
 
 	// Pass GOTRACEBACK for issue #41120 to try to get more

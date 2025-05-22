@@ -310,6 +310,7 @@ type dbgVar struct {
 var debug struct {
 	cgocheck                 int32
 	clobberfree              int32
+	containermaxprocs        int32
 	decoratemappings         int32
 	disablethp               int32
 	dontfreezetheworld       int32
@@ -325,6 +326,7 @@ var debug struct {
 	scheddetail              int32
 	schedtrace               int32
 	tracebackancestors       int32
+	updatemaxprocs           int32
 	asyncpreemptoff          int32
 	harddecommit             int32
 	adaptivestackstart       int32
@@ -337,9 +339,10 @@ var debug struct {
 	// debug.malloc is used as a combined debug check
 	// in the malloc function and should be set
 	// if any of the below debug options is != 0.
-	malloc    bool
-	inittrace int32
-	sbrk      int32
+	malloc          bool
+	inittrace       int32
+	sbrk            int32
+	checkfinalizers int32
 	// traceallocfree controls whether execution traces contain
 	// detailed trace data about memory allocation. This value
 	// affects debug.malloc only if it is != 0 and the execution
@@ -369,10 +372,12 @@ var dbgvars = []*dbgVar{
 	{name: "asynctimerchan", atomic: &debug.asynctimerchan},
 	{name: "cgocheck", value: &debug.cgocheck},
 	{name: "clobberfree", value: &debug.clobberfree},
+	{name: "containermaxprocs", value: &debug.containermaxprocs, def: 1},
 	{name: "dataindependenttiming", value: &debug.dataindependenttiming},
 	{name: "decoratemappings", value: &debug.decoratemappings, def: 1},
 	{name: "disablethp", value: &debug.disablethp},
 	{name: "dontfreezetheworld", value: &debug.dontfreezetheworld},
+	{name: "checkfinalizers", value: &debug.checkfinalizers},
 	{name: "efence", value: &debug.efence},
 	{name: "gccheckmark", value: &debug.gccheckmark},
 	{name: "gcpacertrace", value: &debug.gcpacertrace},
@@ -394,6 +399,7 @@ var dbgvars = []*dbgVar{
 	{name: "tracecheckstackownership", value: &debug.traceCheckStackOwnership},
 	{name: "tracebackancestors", value: &debug.tracebackancestors},
 	{name: "tracefpunwindoff", value: &debug.tracefpunwindoff},
+	{name: "updatemaxprocs", value: &debug.updatemaxprocs, def: 1},
 }
 
 func parsedebugvars() {
@@ -438,7 +444,7 @@ func parsedebugvars() {
 	// apply environment settings
 	parsegodebug(godebug, nil)
 
-	debug.malloc = (debug.inittrace | debug.sbrk) != 0
+	debug.malloc = (debug.inittrace | debug.sbrk | debug.checkfinalizers) != 0
 	debug.profstackdepth = min(debug.profstackdepth, maxProfStackDepth)
 
 	// Disable async preemption in checkmark mode. The following situation is
