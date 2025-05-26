@@ -14,8 +14,7 @@ package maphash
 
 import (
 	"hash"
-	"internal/byteorder"
-	"math"
+	"internal/abi"
 )
 
 // A Seed is a random value that selects the specific hash function
@@ -293,26 +292,13 @@ func (h *Hash) Clone() (hash.Cloner, error) {
 // such that Comparable(s, v1) == Comparable(s, v2) if v1 == v2.
 // If v != v, then the resulting hash is randomly distributed.
 func Comparable[T comparable](seed Seed, v T) uint64 {
-	escapeForHash(v)
+	abi.EscapeNonString(v)
 	return comparableHash(v, seed)
 }
 
-// escapeForHash forces v to be on the heap, if v contains a
-// non-string pointer. We cannot hash pointers to local variables,
-// as the address of the local variable might change on stack growth.
-// Strings are okay as the hash depends on only the content, not
-// the pointer.
-//
-// This is essentially
-//
-//	if hasNonStringPointers(T) { abi.Escape(v) }
-//
-// Implemented as a compiler intrinsic.
-func escapeForHash[T comparable](v T) { panic("intrinsic") }
-
 // WriteComparable adds x to the data hashed by h.
 func WriteComparable[T comparable](h *Hash, x T) {
-	escapeForHash(x)
+	abi.EscapeNonString(x)
 	// writeComparable (not in purego mode) directly operates on h.state
 	// without using h.buf. Mix in the buffer length so it won't
 	// commute with a buffered write, which either changes h.n or changes
@@ -321,26 +307,4 @@ func WriteComparable[T comparable](h *Hash, x T) {
 		writeComparable(h, h.n)
 	}
 	writeComparable(h, x)
-}
-
-func (h *Hash) float64(f float64) {
-	if f == 0 {
-		h.WriteByte(0)
-		return
-	}
-	var buf [8]byte
-	if f != f {
-		byteorder.LEPutUint64(buf[:], randUint64())
-		h.Write(buf[:])
-		return
-	}
-	byteorder.LEPutUint64(buf[:], math.Float64bits(f))
-	h.Write(buf[:])
-}
-
-func btoi(b bool) byte {
-	if b {
-		return 1
-	}
-	return 0
 }
