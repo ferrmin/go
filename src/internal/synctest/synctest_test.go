@@ -7,13 +7,19 @@ package synctest_test
 import (
 	"fmt"
 	"internal/synctest"
+	"internal/testenv"
 	"iter"
+	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+	"weak"
 )
 
 func TestNow(t *testing.T) {
@@ -211,6 +217,65 @@ func TestTimerFromOutsideBubble(t *testing.T) {
 	if tm.Stop() {
 		t.Errorf("synctest.Run unexpectedly returned before timer fired")
 	}
+}
+
+// TestTimerNondeterminism verifies that timers firing at the same instant
+// don't always fire in exactly the same order.
+func TestTimerNondeterminism(t *testing.T) {
+	synctest.Run(func() {
+		const iterations = 1000
+		var seen1, seen2 bool
+		for range iterations {
+			tm1 := time.NewTimer(0)
+			tm2 := time.NewTimer(0)
+			select {
+			case <-tm1.C:
+				seen1 = true
+			case <-tm2.C:
+				seen2 = true
+			}
+			if seen1 && seen2 {
+				return
+			}
+			synctest.Wait()
+		}
+		t.Errorf("after %v iterations, seen timer1:%v, timer2:%v; want both", iterations, seen1, seen2)
+	})
+}
+
+// TestSleepNondeterminism verifies that goroutines sleeping to the same instant
+// don't always schedule in exactly the same order.
+func TestSleepNondeterminism(t *testing.T) {
+	synctest.Run(func() {
+		const iterations = 1000
+		var seen1, seen2 bool
+		for range iterations {
+			var first atomic.Int32
+			go func() {
+				time.Sleep(1)
+				first.CompareAndSwap(0, 1)
+			}()
+			go func() {
+				time.Sleep(1)
+				first.CompareAndSwap(0, 2)
+			}()
+			time.Sleep(1)
+			synctest.Wait()
+			switch v := first.Load(); v {
+			case 1:
+				seen1 = true
+			case 2:
+				seen2 = true
+			default:
+				t.Fatalf("first = %v, want 1 or 2", v)
+			}
+			if seen1 && seen2 {
+				return
+			}
+			synctest.Wait()
+		}
+		t.Errorf("after %v iterations, seen goroutine 1:%v, 2:%v; want both", iterations, seen1, seen2)
+	})
 }
 
 func TestChannelFromOutsideBubble(t *testing.T) {
@@ -521,7 +586,7 @@ func TestReflectFuncOf(t *testing.T) {
 	})
 }
 
-func TestWaitGroup(t *testing.T) {
+func TestWaitGroupInBubble(t *testing.T) {
 	synctest.Run(func() {
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -535,6 +600,83 @@ func TestWaitGroup(t *testing.T) {
 		if got := time.Since(start); got != delay {
 			t.Fatalf("WaitGroup.Wait() took %v, want %v", got, delay)
 		}
+	})
+}
+
+func TestWaitGroupOutOfBubble(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	donec := make(chan struct{})
+	go synctest.Run(func() {
+		// Since wg.Add was called outside the bubble, Wait is not durably blocking
+		// and this waits until wg.Done is called below.
+		wg.Wait()
+		close(donec)
+	})
+	select {
+	case <-donec:
+		t.Fatalf("synctest.Run finished before WaitGroup.Done called")
+	case <-time.After(1 * time.Millisecond):
+	}
+	wg.Done()
+	<-donec
+}
+
+func TestWaitGroupMovedIntoBubble(t *testing.T) {
+	wantFatal(t, "fatal error: sync: WaitGroup.Add called from inside and outside synctest bubble", func() {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		synctest.Run(func() {
+			wg.Add(1)
+		})
+	})
+}
+
+func TestWaitGroupMovedOutOfBubble(t *testing.T) {
+	wantFatal(t, "fatal error: sync: WaitGroup.Add called from inside and outside synctest bubble", func() {
+		var wg sync.WaitGroup
+		synctest.Run(func() {
+			wg.Add(1)
+		})
+		wg.Add(1)
+	})
+}
+
+func TestWaitGroupMovedBetweenBubblesWithNonZeroCount(t *testing.T) {
+	wantFatal(t, "fatal error: sync: WaitGroup.Add called from multiple synctest bubbles", func() {
+		var wg sync.WaitGroup
+		synctest.Run(func() {
+			wg.Add(1)
+		})
+		synctest.Run(func() {
+			wg.Add(1)
+		})
+	})
+}
+
+func TestWaitGroupMovedBetweenBubblesWithZeroCount(t *testing.T) {
+	var wg sync.WaitGroup
+	synctest.Run(func() {
+		wg.Add(1)
+		wg.Done()
+	})
+	synctest.Run(func() {
+		// Reusing the WaitGroup is safe, because its count is zero.
+		wg.Add(1)
+		wg.Done()
+	})
+}
+
+func TestWaitGroupMovedBetweenBubblesAfterWait(t *testing.T) {
+	var wg sync.WaitGroup
+	synctest.Run(func() {
+		wg.Go(func() {})
+		wg.Wait()
+	})
+	synctest.Run(func() {
+		// Reusing the WaitGroup is safe, because its count is zero.
+		wg.Go(func() {})
+		wg.Wait()
 	})
 }
 
@@ -625,6 +767,17 @@ func TestHappensBefore(t *testing.T) {
 	}
 }
 
+// https://go.dev/issue/73817
+func TestWeak(t *testing.T) {
+	synctest.Run(func() {
+		for range 5 {
+			runtime.GC()
+			b := make([]byte, 1024)
+			weak.Make(&b)
+		}
+	})
+}
+
 func wantPanic(t *testing.T, want string) {
 	if e := recover(); e != nil {
 		if got := fmt.Sprint(e); got != want {
@@ -632,5 +785,25 @@ func wantPanic(t *testing.T, want string) {
 		}
 	} else {
 		t.Errorf("got no panic, want one")
+	}
+}
+
+func wantFatal(t *testing.T, want string, f func()) {
+	t.Helper()
+
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		f()
+		return
+	}
+
+	cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^"+t.Name()+"$")
+	cmd = testenv.CleanCmdEnv(cmd)
+	cmd.Env = append(cmd.Env, "GO_WANT_HELPER_PROCESS=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("expected test function to panic, but test returned successfully")
+	}
+	if !strings.Contains(string(out), want) {
+		t.Errorf("wanted test output contaiing %q; got %q", want, string(out))
 	}
 }
