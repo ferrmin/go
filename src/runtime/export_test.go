@@ -59,9 +59,6 @@ const CrashStackImplemented = crashStackImplemented
 const TracebackInnerFrames = tracebackInnerFrames
 const TracebackOuterFrames = tracebackOuterFrames
 
-var MapKeys = keys
-var MapValues = values
-
 var LockPartialOrder = lockPartialOrder
 
 type TimeTimer = timeTimer
@@ -1773,7 +1770,7 @@ func NewUserArena() *UserArena {
 func (a *UserArena) New(out *any) {
 	i := efaceOf(out)
 	typ := i._type
-	if typ.Kind_&abi.KindMask != abi.Pointer {
+	if typ.Kind() != abi.Pointer {
 		panic("new result of non-ptr type")
 	}
 	typ = (*ptrtype)(unsafe.Pointer(typ)).Elem
