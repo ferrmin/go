@@ -31,6 +31,7 @@ const (
 	removeDeadValues                 = true
 
 	repZeroThreshold = 1408 // size beyond which we use REP STOS for zeroing
+	repMoveThreshold = 1408 // size beyond which we use REP MOVS for copying
 )
 
 // deadcode indicates whether rewrite should try to remove any values that become dead.
@@ -2620,18 +2621,4 @@ func panicBoundsCToAux(p PanicBoundsC) Aux {
 }
 func panicBoundsCCToAux(p PanicBoundsCC) Aux {
 	return p
-}
-
-// When v is (IMake typ (StructMake ...)), convert to
-// (IMake typ arg) where arg is the pointer-y argument to
-// the StructMake (there must be exactly one).
-func imakeOfStructMake(v *Value) *Value {
-	var arg *Value
-	for _, a := range v.Args[1].Args {
-		if a.Type.Size() > 0 {
-			arg = a
-			break
-		}
-	}
-	return v.Block.NewValue2(v.Pos, OpIMake, v.Type, v.Args[0], arg)
 }
