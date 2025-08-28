@@ -1407,7 +1407,7 @@ func (s *regAllocState) regalloc(f *Func) {
 				case OpSB:
 					s.assignReg(s.SBReg, v, v)
 					s.sb = v.ID
-				case OpARM64ZERO:
+				case OpARM64ZERO, OpLOONG64ZERO:
 					s.assignReg(s.ZeroIntReg, v, v)
 				default:
 					f.Fatalf("unknown fixed-register op %s", v)
@@ -1725,10 +1725,9 @@ func (s *regAllocState) regalloc(f *Func) {
 					// spilling the value with the most distant next use.
 					continue
 				}
-				// Copy input to a new clobberable register.
+				// Copy input to a different register that won't be clobbered.
 				c := s.allocValToReg(v.Args[i], m, true, v.Pos)
 				s.copies[c] = false
-				args[i] = c
 			}
 
 			// Pick a temporary register if needed.
