@@ -127,7 +127,8 @@ func getdyn(n ir.Node, top bool) initGenType {
 	return mode
 }
 
-// isStaticCompositeLiteral reports whether n is a compile-time constant.
+// isStaticCompositeLiteral reports whether n is a compile-time constant,
+// which can be represented in the read-only data section.
 func isStaticCompositeLiteral(n ir.Node) bool {
 	switch n.Op() {
 	case ir.OSLICELIT:
@@ -153,6 +154,11 @@ func isStaticCompositeLiteral(n ir.Node) bool {
 		}
 		return true
 	case ir.OLITERAL, ir.ONIL:
+		if base.Ctxt.IsFIPS() && n.Type().IsString() {
+			// A string reference requires a relocation, not allowed
+			// in static data in FIPS mode.
+			return false
+		}
 		return true
 	case ir.OCONVIFACE:
 		// See staticinit.Schedule.StaticAssign's OCONVIFACE case for comments.
@@ -220,7 +226,7 @@ func fixedlit(ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, 
 				return ir.BlankNode, r.Value
 			}
 			ir.SetPos(r)
-			return ir.NewSelectorExpr(base.Pos, ir.ODOT, var_, r.Sym()), r.Value
+			return ir.NewSelectorExpr(base.Pos, ir.OXDOT, var_, r.Sym()), r.Value
 		}
 	default:
 		base.Fatalf("fixedlit bad op: %v", n.Op())
@@ -567,11 +573,7 @@ func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 			// lay out static data
 			vstat := readonlystaticname(t)
 
-			ctxt := inInitFunction
-			if n.Op() == ir.OARRAYLIT {
-				ctxt = inNonInitFunction
-			}
-			fixedlit(ctxt, initKindStatic, n, vstat, init)
+			fixedlit(inInitFunction, initKindStatic, n, vstat, init)
 
 			// copy static to var
 			appendWalkStmt(init, ir.NewAssignStmt(base.Pos, var_, vstat))

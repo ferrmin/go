@@ -199,6 +199,11 @@ Diff:
 	}
 	obj.Flushplist(ctxt, pList, nil)
 
+	if !ok {
+		// If we've encountered errors, the output is unlikely to be sane.
+		t.FailNow()
+	}
+
 	for p := top; p != nil; p = p.Link {
 		if p.As == obj.ATEXT {
 			text = p.From.Sym
@@ -409,6 +414,14 @@ func TestARM64Encoder(t *testing.T) {
 	testEndToEnd(t, "arm64", "arm64enc")
 }
 
+func TestARM64SVEEncoder(t *testing.T) {
+	testEndToEnd(t, "arm64", "arm64sveenc")
+}
+
+func TestARM64SVEErrors(t *testing.T) {
+	testErrors(t, "arm64", "arm64sveerror")
+}
+
 func TestARM64Errors(t *testing.T) {
 	testErrors(t, "arm64", "arm64error")
 }
@@ -486,16 +499,35 @@ func TestPPC64EndToEnd(t *testing.T) {
 	}
 }
 
-func TestRISCVEndToEnd(t *testing.T) {
-	testEndToEnd(t, "riscv64", "riscv64")
+func testRISCV64AllProfiles(t *testing.T, testFn func(t *testing.T)) {
+	t.Helper()
+
+	defer func(orig int) { buildcfg.GORISCV64 = orig }(buildcfg.GORISCV64)
+
+	for _, goriscv64 := range []int{20, 22, 23} {
+		t.Run(fmt.Sprintf("rva%vu64", goriscv64), func(t *testing.T) {
+			buildcfg.GORISCV64 = goriscv64
+			testFn(t)
+		})
+	}
 }
 
-func TestRISCVErrors(t *testing.T) {
-	testErrors(t, "riscv64", "riscv64error")
+func TestRISCV64EndToEnd(t *testing.T) {
+	testRISCV64AllProfiles(t, func(t *testing.T) {
+		testEndToEnd(t, "riscv64", "riscv64")
+	})
 }
 
-func TestRISCVValidation(t *testing.T) {
-	testErrors(t, "riscv64", "riscv64validation")
+func TestRISCV64Errors(t *testing.T) {
+	testRISCV64AllProfiles(t, func(t *testing.T) {
+		testErrors(t, "riscv64", "riscv64error")
+	})
+}
+
+func TestRISCV64Validation(t *testing.T) {
+	testRISCV64AllProfiles(t, func(t *testing.T) {
+		testErrors(t, "riscv64", "riscv64validation")
+	})
 }
 
 func TestS390XEndToEnd(t *testing.T) {

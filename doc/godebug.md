@@ -85,6 +85,9 @@ if the work module's `go.mod` or the workspace's `go.work`
 says `go` `1.20`, then the program defaults to `panicnil=1`,
 matching Go 1.20 instead of Go 1.21.
 
+As an exception, GODEBUGs introduced for security releases
+will have the new behavior apply to all versions.
+
 Because this method of setting GODEBUG defaults was introduced only in Go 1.21,
 programs listing versions of Go earlier than Go 1.20 are configured to match Go 1.20,
 not the older version.
@@ -133,9 +136,7 @@ are also treated as invalid.
 The defaults that will be compiled into a main package
 are reported by the command:
 
-{{raw `
 	go list -f '{{.DefaultGODEBUG}}' my/main/package
-`}}
 
 Only differences from the base Go toolchain defaults are reported.
 
@@ -153,6 +154,22 @@ for example,
 see the [runtime documentation](/pkg/runtime#hdr-Environment_Variables)
 and the [go command documentation](/cmd/go#hdr-Build_and_test_caching).
 
+### Go 1.27
+
+Go 1.27 removed the `gotypesalias` setting, as noted in the [Go 1.22](#go-122) section.
+
+Go 1.27 added a new `htmlmetacontenturlescape` setting that controls whether
+html/template will escape URLs in the `url=` portion of the content attribute of
+HTML meta tags. The default `htmlmetacontentescape=1` will cause URLs to be
+escaped. Setting `htmlmetacontentescape=0` disables this behavior. To avoid
+content injection attacks, this setting and default was backported to Go 1.25.8
+and Go 1.26.1.
+
+Go 1.27 changes the default for `tracebacklabels` (added in [Go 1.26](#go-126))
+to `1`. This opt-out is expected to be kept indefinitely in case goroutine
+labels acquire sensitive information that shouldn't be made available in
+tracebacks.
+
 ### Go 1.26
 
 Go 1.26 added a new `httpcookiemaxnum` setting that controls the maximum number
@@ -162,6 +179,13 @@ will fail early. The default value is `httpcookiemaxnum=3000`. Setting
 `httpcookiemaxnum=0` will allow the cookie parsing to accept an indefinite
 number of cookies. To avoid denial of service attacks, this setting and default
 was backported to Go 1.25.2 and Go 1.24.8.
+
+Go 1.26 added a new `urlmaxqueryparams` setting that controls the maximum number
+of query parameters that net/url will accept when parsing a URL-encoded query string.
+If the number of parameters exceeds the number set in `urlmaxqueryparams`,
+parsing will fail early. The default value is `urlmaxqueryparams=10000`.
+Setting `urlmaxqueryparams=0` disables the limit. To avoid denial of service
+attacks, this setting and default was backported to Go 1.25.6 and Go 1.24.12.
 
 Go 1.26 added a new `urlstrictcolons` setting that controls whether `net/url.Parse`
 allows malformed hostnames containing colons outside of a bracketed IPv6 address.

@@ -459,6 +459,24 @@ func f14(p, q *int, a []int) {
 	useInt(a[i2+j]) // ERROR "Proved IsInBounds$"
 }
 
+func f14mem(q *int, a []int) (r int) {
+	p := &r
+	i1 := *q
+	*p = 1 // CSE of the "q" pointer load across disjoint store to "p"
+	i2 := *q
+	useInt(a[i1])
+	useInt(a[i2]) // ERROR "Proved IsInBounds$"
+	return r
+}
+
+func sliceptr(a *[]int, i int) int {
+	var x, y int
+	px, py := &x, &y
+	*px = (*a)[i]
+	*py = (*a)[i] // ERROR "Proved IsInBounds$"
+	return x + y
+}
+
 func f15(s []int, x int) {
 	useSlice(s[x:])
 	useSlice(s[:x]) // ERROR "Proved IsSliceInBounds$"
@@ -2475,6 +2493,40 @@ func issue75144ifNot(a, b []uint64) bool {
 	return false
 }
 
+func issue76269(a, b []byte) byte {
+	lenA := len(a)
+	lenB := len(b)
+	idxA := lenA - 1
+	idxB := lenB - 1
+
+	c := byte(0)
+
+	for idxA >= 0 && idxB >= 0 { // ERROR "Induction variable: limits \[0,\?\], increment 1$"
+		c ^= a[idxA] // ERROR "Proved IsInBounds$"
+		c ^= b[idxB] // ERROR "Proved IsInBounds$"
+		idxA--
+		idxB--
+	}
+	return c
+}
+
+func ex76269shouldNotIndVar() {
+	i, j := 0, 0
+	var a [4]byte
+	for {
+		if i >= 4 {
+			goto next
+		} // looks like a loop exit, but isn't!
+		if j >= 4 { // ERROR "Disproved Leq64$"
+			break
+		}
+	next:
+		_, _ = a[i], a[j] // ERROR "Proved IsInBounds$"
+		i++
+		j++
+	}
+}
+
 func mulIntoAnd(a, b uint) uint {
 	if a > 1 || b > 1 {
 		return 0
@@ -2552,7 +2604,7 @@ func swapbound(v []int) {
 	for i := 0; i < len(v)/2; i++ { // ERROR "Proved Div64 is unsigned|Induction variable"
 		v[i], // ERROR "Proved IsInBounds"
 			v[len(v)-1-i] = // ERROR "Proved IsInBounds"
-			v[len(v)-1-i],
+			v[len(v)-1-i], // ERROR "Proved IsInBounds"
 			v[i] // ERROR "Proved IsInBounds"
 	}
 }
@@ -2724,6 +2776,30 @@ func issue76688(x, y uint64) uint64 {
 	}
 	// We do not want to rewrite the multiply to a condselect here since opt can do a better job with a left shift.
 	return x * y
+}
+
+func issue76429(s []byte, k int) byte {
+	if k < 0 || k >= len(s) {
+		return 0
+	}
+	s = s[k:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
+	return s[0] // ERROR "Proved IsInBounds"
+}
+
+func booleanLikeNeqWithOneToEqWithZero(x uint64) uint64 {
+	x = min(x, 1)
+	if x != 1 { // ERROR "argument is boolean-like; rewrote to Eq64 against 0$"
+		return 42
+	}
+	return 1337
+}
+
+func booleanLikeEqWithOneToNeqWithZero(x uint64) uint64 {
+	x = min(x, 1)
+	if x == 1 { // ERROR "argument is boolean-like; rewrote to Neq64 against 0$"
+		return 42
+	}
+	return 1337
 }
 
 //go:noinline

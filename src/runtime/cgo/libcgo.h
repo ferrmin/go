@@ -49,7 +49,7 @@ extern void (*_cgo_thread_start)(ThreadStart *ts);
  * Creates a new operating system thread without updating any Go state
  * (OS dependent).
  */
-extern void (*_cgo_sys_thread_create)(void* (*func)(void*), void* arg);
+extern void (*_cgo_sys_thread_create)(void* (*func)(void*));
 
 /*
  * Indicates whether a dummy pthread per-thread variable is allocated.
@@ -72,6 +72,13 @@ uintptr_t _cgo_wait_runtime_init_done(void);
  * Get the low and high boundaries of the stack.
  */
 void x_cgo_getstackbound(uintptr bounds[2]);
+
+/*
+ * Calls into the Go tool chain, where all registers are caller save.
+ * Called from C, it saves all callee-save registers and calls
+ * setg_gcc to set g before calling fn.
+ */
+void crosscall1(void (*fn)(void), void (*setg_gcc)(void*), void *g);
 
 /*
  * Prints error then calls abort. For linux and android.

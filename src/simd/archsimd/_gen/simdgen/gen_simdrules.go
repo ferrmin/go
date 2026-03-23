@@ -129,7 +129,8 @@ func writeSIMDRules(ops []Operation) *bytes.Buffer {
 	// asm -> masked merging rules
 	maskedMergeOpts := make(map[string]string)
 	s2n := map[int]string{8: "B", 16: "W", 32: "D", 64: "Q"}
-	asmCheck := map[string]bool{}
+	asmCheck := map[string]bool{}    // for masked merge optimizations.
+	sftimmCheck := map[string]bool{} // deduplicate sftimm rules
 	var allData []tplRuleData
 	var optData []tplRuleData    // for mask peephole optimizations, and other misc
 	var memOptData []tplRuleData // for memory peephole optimizations
@@ -229,8 +230,8 @@ func writeSIMDRules(ops []Operation) *bytes.Buffer {
 
 		if gOp.SpecialLower != nil {
 			if *gOp.SpecialLower == "sftimm" {
-				if data.GoType[0] == 'I' {
-					// only do these for signed types, it is a duplicate rewrite for unsigned
+				if !sftimmCheck[data.Asm] {
+					sftimmCheck[data.Asm] = true
 					sftImmData := data
 					if tplName == "maskIn" {
 						sftImmData.tplName = "masksftimm"
@@ -275,7 +276,7 @@ func writeSIMDRules(ops []Operation) *bytes.Buffer {
 						origArgs = after
 					}
 					immArg = "[c] "
-					immArgCombineOff = " [makeValAndOff(int32(int8(c)),off)] "
+					immArgCombineOff = " [makeValAndOff(int32(uint8(c)),off)] "
 				}
 				memOpData.ArgsLoadAddr = immArg + origArgs + fmt.Sprintf("l:(VMOVDQUload%d {sym} [off] ptr mem)", *lastVreg.Bits)
 				// Remove the last vreg from the arg and change it to "ptr".
